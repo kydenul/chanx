@@ -2,6 +2,10 @@ package chanx
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +16,14 @@ import (
 	"github.com/leanovate/gopter/prop"
 	"github.com/stretchr/testify/assert"
 )
+
+// TestMain runs the test suite
+// Note: goleak is available for individual test use via goleak.VerifyNone(t)
+// The goroutine cleanup property tests (Property 14 & 15) manually verify
+// goroutine cleanup for channel functions.
+func TestMain(m *testing.M) {
+	os.Exit(m.Run())
+}
 
 // Feature: worker-pool, Property 1: Worker 数量匹配
 // 对于任何 worker 数量配置，创建线程池后实际运行的 worker 数量应该与指定数量相等
@@ -1527,9 +1539,9 @@ func TestProperty_TeeContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 25: Bridge 值完整性
-// 对于任何 channel 流，Bridge 输出的值总数应该等于所有内部 channel 值的总和
-// Validates: Requirements 9.1, 9.4
+// Feature: chanx-optimization, Property 3: Bridge 值完整性
+// 对于任何 channel 流，Bridge 函数应该转发所有输入值到输出 channel
+// Validates: Requirements 2.2
 func TestProperty_BridgeValueCompleteness(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1829,6 +1841,190 @@ func TestProperty_OrAnyClose(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
+// Feature: chanx-optimization, Property 1: Or 函数 Goroutine 清理
+// 对于任何数量的输入 channel，当 Or 函数返回后，所有相关的 goroutine 应该在合理时间内（1秒）被清理
+// Validates: Requirements 1.2
+func TestProperty_OrGoroutineCleanup(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Or function cleans up goroutines after completion",
+		prop.ForAll(
+			func(channelCount int) bool {
+				if channelCount < 1 {
+					channelCount = 1
+				}
+				if channelCount > 50 {
+					channelCount = 50 // Cap at 50 for reasonable test time
+				}
+
+				// Record initial goroutine count
+				initialGoroutines := runtime.NumGoroutine()
+
+				c := NewChanx[struct{}]()
+
+				// Create multiple channels
+				channels := make([]<-chan struct{}, channelCount)
+				closeFuncs := make([]context.CancelFunc, channelCount)
+
+				for i := range channelCount {
+					ctx, cancel := context.WithCancel(context.Background())
+					closeFuncs[i] = cancel
+					channels[i] = c.RepeatFn(ctx, func() struct{} {
+						time.Sleep(5 * time.Millisecond)
+						return struct{}{}
+					})
+				}
+
+				// Call Or with all channels
+				orChan := c.Or(channels...)
+
+				// Close one channel to trigger Or completion
+				closeFuncs[0]()
+
+				// Wait for Or channel to close
+				timeout := time.After(1 * time.Second)
+				closed := false
+				for !closed {
+					select {
+					case _, ok := <-orChan:
+						if !ok {
+							closed = true
+						}
+					case <-timeout:
+						// Clean up
+						for _, cancel := range closeFuncs {
+							cancel()
+						}
+						t.Logf("Or channel did not close in time")
+						return false
+					}
+				}
+
+				// Close all other channels
+				for _, cancel := range closeFuncs {
+					cancel()
+				}
+
+				// Give goroutines time to clean up (200ms should be sufficient)
+				time.Sleep(200 * time.Millisecond)
+
+				// Check goroutine count
+				finalGoroutines := runtime.NumGoroutine()
+
+				// Allow some tolerance for background goroutines
+				// The Or goroutine should be cleaned up
+				if finalGoroutines > initialGoroutines+3 {
+					t.Logf(
+						"Goroutine leak detected: initial=%d, final=%d, diff=%d",
+						initialGoroutines,
+						finalGoroutines,
+						finalGoroutines-initialGoroutines,
+					)
+					return false
+				}
+
+				return true
+			},
+			gen.IntRange(1, 50),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 2: Or 函数快速响应
+// 对于任何输入 channel 集合，当任一 channel 关闭时，Or 函数的输出 channel 应该立即关闭
+// Validates: Requirements 1.3
+func TestProperty_OrFastResponse(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Or function responds immediately when any channel closes",
+		prop.ForAll(
+			func(channelCount, closeIndex int) bool {
+				if channelCount < 2 {
+					channelCount = 2
+				}
+				if channelCount > 50 {
+					channelCount = 50
+				}
+				// Ensure closeIndex is valid
+				closeIndex = closeIndex % channelCount
+				if closeIndex < 0 {
+					closeIndex = -closeIndex
+				}
+
+				c := NewChanx[struct{}]()
+
+				// Create multiple channels
+				channels := make([]<-chan struct{}, channelCount)
+				closeFuncs := make([]context.CancelFunc, channelCount)
+
+				for i := range channelCount {
+					ctx, cancel := context.WithCancel(context.Background())
+					closeFuncs[i] = cancel
+					channels[i] = c.RepeatFn(ctx, func() struct{} {
+						time.Sleep(10 * time.Millisecond)
+						return struct{}{}
+					})
+				}
+
+				// Ensure all contexts are cancelled at the end
+				defer func() {
+					for _, cancel := range closeFuncs {
+						cancel()
+					}
+				}()
+
+				// Call Or with all channels
+				orChan := c.Or(channels...)
+
+				// Record time before closing
+				startTime := time.Now()
+
+				// Close the channel at closeIndex
+				closeFuncs[closeIndex]()
+
+				// The Or channel should close quickly (within 500ms)
+				timeout := time.After(500 * time.Millisecond)
+				select {
+				case _, ok := <-orChan:
+					if !ok {
+						// Channel closed
+						elapsed := time.Since(startTime)
+						if elapsed > 500*time.Millisecond {
+							t.Logf("Or took too long to respond: %v", elapsed)
+							return false
+						}
+						return true
+					}
+					// If we received a value, keep checking for closure
+					for {
+						select {
+						case _, ok := <-orChan:
+							if !ok {
+								elapsed := time.Since(startTime)
+								if elapsed > 500*time.Millisecond {
+									t.Logf("Or took too long to respond: %v", elapsed)
+									return false
+								}
+								return true
+							}
+						case <-timeout:
+							t.Logf("Or channel did not close quickly after input channel closed")
+							return false
+						}
+					}
+				case <-timeout:
+					t.Logf("Or channel did not close quickly after input channel closed")
+					return false
+				}
+			},
+			gen.IntRange(2, 50),
+			gen.Int(),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
 // Feature: worker-pool, Property 29: OrDone 值转发
 // 对于任何 输入 channel，OrDone 应该将所有值完整转发到输出 channel
 // Validates: Requirements 11.1
@@ -2070,4 +2266,1226 @@ func TestProperty_OrDoneRaceCondition(t *testing.T) {
 		))
 
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 4: 批量提交完整性
+// 对于任何任务切片，SubmitBatch 应该尝试提交所有任务，并返回准确的提交计数
+// Validates: Requirements 3.1
+func TestProperty_BatchSubmitCompleteness(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("SubmitBatch attempts to submit all tasks and returns accurate count",
+		prop.ForAll(
+			func(workerCount, taskCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+				if taskCount < 0 {
+					taskCount = 0
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					return false
+				}
+				defer wp.Close()
+
+				// Create tasks
+				tasks := make([]Task[int], taskCount)
+				for i := range taskCount {
+					value := i
+					tasks[i] = Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(5 * time.Millisecond)
+							return value, nil
+						},
+					}
+				}
+
+				// Start goroutine to drain results
+				resultsDone := make(chan bool)
+				go func() {
+					for range taskCount {
+						<-wp.Results()
+					}
+					resultsDone <- true
+				}()
+
+				// Submit batch
+				result := wp.SubmitBatch(tasks)
+
+				// Verify all tasks were submitted
+				assert.Equal(t, taskCount, result.SubmittedCount,
+					"SubmittedCount should match number of tasks")
+				assert.Empty(t, result.Errors, "Should have no errors")
+
+				// Wait for all results
+				select {
+				case <-resultsDone:
+				case <-ctx.Done():
+					t.Logf("Context cancelled while waiting for results")
+					return false
+				}
+
+				return result.SubmittedCount == taskCount && len(result.Errors) == 0
+			},
+			gen.IntRange(1, 10),
+			gen.IntRange(0, 50),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 5: 批量提交状态准确性
+// 对于任何批量提交操作，返回的 SubmittedCount 加上 Errors 的数量应该等于输入任务的总数
+// Validates: Requirements 3.2
+func TestProperty_BatchSubmitStatusAccuracy(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("SubmittedCount plus Errors count equals total tasks",
+		prop.ForAll(
+			func(workerCount, taskCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+				if taskCount < 1 {
+					taskCount = 1
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					return false
+				}
+				defer wp.Close()
+
+				// Create tasks
+				tasks := make([]Task[int], taskCount)
+				for i := range taskCount {
+					value := i
+					tasks[i] = Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(5 * time.Millisecond)
+							return value, nil
+						},
+					}
+				}
+
+				// Start goroutine to drain results
+				go func() {
+					for range wp.Results() {
+						// Drain all results
+					}
+				}()
+
+				// Submit batch
+				result := wp.SubmitBatch(tasks)
+
+				// Verify: SubmittedCount + len(Errors) == taskCount
+				totalAccounted := result.SubmittedCount + len(result.Errors)
+				assert.Equal(t, taskCount, totalAccounted,
+					"SubmittedCount + Errors should equal total tasks")
+
+				return totalAccounted == taskCount
+			},
+			gen.IntRange(1, 10),
+			gen.IntRange(1, 50),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 6: 批量提交 Context 取消
+// 对于任何批量提交操作，当 context 被取消时，应该停止提交剩余任务并返回已提交的数量
+// Validates: Requirements 3.3
+func TestProperty_BatchSubmitContextCancellation(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("SubmitBatch stops on context cancellation",
+		prop.ForAll(
+			func(workerCount, taskCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+				if taskCount < 10 {
+					taskCount = 10 // Need enough tasks to test cancellation mid-batch
+				}
+
+				ctx, cancel := context.WithCancel(context.Background())
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					cancel()
+					return false
+				}
+				defer wp.Close()
+
+				// Create tasks that take some time
+				tasks := make([]Task[int], taskCount)
+				for i := range taskCount {
+					value := i
+					tasks[i] = Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(50 * time.Millisecond)
+							return value, nil
+						},
+					}
+				}
+
+				// Start goroutine to drain results
+				go func() {
+					for range wp.Results() {
+						// Drain all results
+					}
+				}()
+
+				// Start goroutine to cancel context after a short delay
+				go func() {
+					time.Sleep(20 * time.Millisecond)
+					cancel()
+				}()
+
+				// Submit batch
+				result := wp.SubmitBatch(tasks)
+
+				// Verify that we stopped early due to cancellation
+				// SubmittedCount should be less than taskCount
+				// And we should have at least one error about cancellation
+				if result.SubmittedCount == taskCount {
+					// All tasks were submitted before cancellation, which is possible
+					// but unlikely with our timing
+					t.Logf("All tasks submitted before cancellation (edge case)")
+					return true
+				}
+
+				// We should have stopped early
+				assert.Less(t, result.SubmittedCount, taskCount,
+					"Should have stopped submitting after context cancellation")
+				assert.NotEmpty(t, result.Errors,
+					"Should have errors after context cancellation")
+
+				// Verify the error mentions context cancellation
+				if len(result.Errors) > 0 {
+					errorMsg := result.Errors[0].Error()
+					assert.Contains(t, errorMsg, "context cancelled",
+						"Error should mention context cancellation")
+				}
+
+				return result.SubmittedCount < taskCount && len(result.Errors) > 0
+			},
+			gen.IntRange(1, 5),
+			gen.IntRange(10, 50),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 7: Metrics 活跃 Worker 准确性
+// 对于任何 WorkerPool 实例，Metrics 返回的 ActiveWorkers 应该不超过配置的 workerCount
+// Validates: Requirements 4.1
+func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Metrics ActiveWorkers does not exceed configured workerCount",
+		prop.ForAll(
+			func(workerCount, taskCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+				if taskCount < 1 {
+					taskCount = 1
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					return false
+				}
+				defer wp.Close()
+
+				// Start goroutine to drain results
+				go func() {
+					for range wp.Results() {
+						// Drain all results
+					}
+				}()
+
+				// Submit tasks that take some time
+				for i := range taskCount {
+					err := wp.Submit(Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(50 * time.Millisecond)
+							return i, nil
+						},
+					})
+					assert.NoError(t, err, "Failed to submit task")
+					if err != nil {
+						return false
+					}
+
+					// Check metrics periodically
+					if i%5 == 0 {
+						metrics := wp.Metrics()
+						if metrics.ActiveWorkers > workerCount {
+							t.Logf("ActiveWorkers (%d) exceeds workerCount (%d)",
+								metrics.ActiveWorkers, workerCount)
+							return false
+						}
+					}
+				}
+
+				// Wait a bit for tasks to start executing
+				time.Sleep(100 * time.Millisecond)
+
+				// Check final metrics
+				metrics := wp.Metrics()
+				assert.LessOrEqual(t, metrics.ActiveWorkers, workerCount,
+					"ActiveWorkers should not exceed workerCount")
+
+				return metrics.ActiveWorkers <= workerCount
+			},
+			gen.IntRange(1, 10),
+			gen.IntRange(10, 50),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 8: Metrics 队列长度准确性
+// 对于任何 WorkerPool 实例，当提交的任务数超过 worker 数量时，QueuedTasks 应该大于 0
+// Validates: Requirements 4.2
+func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Metrics QueuedTasks is greater than 0 when tasks exceed workers",
+		prop.ForAll(
+			func(workerCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					return false
+				}
+				defer wp.Close()
+
+				// Start goroutine to drain results slowly
+				taskCount := workerCount * 3
+				resultsDone := make(chan bool)
+				go func() {
+					for range taskCount {
+						<-wp.Results()
+						// Drain results slowly to allow queue to build up
+						time.Sleep(10 * time.Millisecond)
+					}
+					resultsDone <- true
+				}()
+
+				// Submit tasks concurrently to build up a queue
+				// Use a WaitGroup to track submission goroutines
+				var submitWg sync.WaitGroup
+				for i := range taskCount {
+					submitWg.Add(1)
+					go func(taskID int) {
+						defer submitWg.Done()
+						err := wp.Submit(Task[int]{
+							Fn: func() (int, error) {
+								time.Sleep(100 * time.Millisecond)
+								return taskID, nil
+							},
+						})
+						if err != nil {
+							t.Logf("Failed to submit task %d: %v", taskID, err)
+						}
+					}(i)
+				}
+
+				// Wait a bit for submissions to start and queue to build
+				time.Sleep(50 * time.Millisecond)
+
+				// Check metrics - should have queued tasks
+				metrics := wp.Metrics()
+
+				// With more tasks than workers and slow execution, we should have queued tasks
+				assert.Greater(t, metrics.QueuedTasks, 0,
+					"QueuedTasks should be greater than 0 when tasks exceed workers")
+
+				// Wait for all submissions and results
+				submitWg.Wait()
+				<-resultsDone
+
+				return metrics.QueuedTasks > 0
+			},
+			gen.IntRange(1, 10),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 9: Metrics 完成计数准确性
+// 对于任何 WorkerPool 实例，CompletedTasks 应该等于成功执行的任务数量
+// Validates: Requirements 4.3
+func TestProperty_MetricsCompletedTasksAccuracy(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Metrics CompletedTasks equals number of successfully executed tasks",
+		prop.ForAll(
+			func(workerCount, taskCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+				if taskCount < 1 {
+					taskCount = 1
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					return false
+				}
+				defer wp.Close()
+
+				// Start goroutine to drain results
+				resultsDone := make(chan bool)
+				go func() {
+					for range taskCount {
+						<-wp.Results()
+					}
+					resultsDone <- true
+				}()
+
+				// Submit tasks that all succeed
+				for i := range taskCount {
+					err := wp.Submit(Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(10 * time.Millisecond)
+							return i, nil
+						},
+					})
+					assert.NoError(t, err, "Failed to submit task")
+					if err != nil {
+						return false
+					}
+				}
+
+				// Wait for all results to be processed
+				<-resultsDone
+
+				// Check metrics
+				metrics := wp.Metrics()
+				assert.Equal(t, int64(taskCount), metrics.CompletedTasks,
+					"CompletedTasks should equal number of successful tasks")
+
+				return metrics.CompletedTasks == int64(taskCount)
+			},
+			gen.IntRange(1, 10),
+			gen.IntRange(1, 50),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 10: Metrics 失败计数准确性
+// 对于任何 WorkerPool 实例，FailedTasks 应该等于返回错误的任务数量
+// Validates: Requirements 4.4
+func TestProperty_MetricsFailedTasksAccuracy(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Metrics FailedTasks equals number of tasks that returned errors",
+		prop.ForAll(
+			func(workerCount, successCount, failCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+				if successCount < 0 {
+					successCount = 0
+				}
+				if failCount < 0 {
+					failCount = 0
+				}
+				totalTasks := successCount + failCount
+				if totalTasks < 1 {
+					return true // Skip empty test cases
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					return false
+				}
+				defer wp.Close()
+
+				// Start goroutine to drain results
+				resultsDone := make(chan bool)
+				go func() {
+					for range totalTasks {
+						<-wp.Results()
+					}
+					resultsDone <- true
+				}()
+
+				// Submit successful tasks
+				for i := range successCount {
+					err := wp.Submit(Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(10 * time.Millisecond)
+							return i, nil
+						},
+					})
+					assert.NoError(t, err, "Failed to submit task")
+					if err != nil {
+						return false
+					}
+				}
+
+				// Submit failing tasks
+				for range failCount {
+					err := wp.Submit(Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(10 * time.Millisecond)
+							return 0, assert.AnError
+						},
+					})
+					assert.NoError(t, err, "Failed to submit task")
+					if err != nil {
+						return false
+					}
+				}
+
+				// Wait for all results to be processed
+				<-resultsDone
+
+				// Check metrics
+				metrics := wp.Metrics()
+				assert.Equal(t, int64(failCount), metrics.FailedTasks,
+					"FailedTasks should equal number of tasks that returned errors")
+				assert.Equal(t, int64(successCount), metrics.CompletedTasks,
+					"CompletedTasks should equal number of successful tasks")
+
+				return metrics.FailedTasks == int64(failCount) &&
+					metrics.CompletedTasks == int64(successCount)
+			},
+			gen.IntRange(1, 10),
+			gen.IntRange(0, 25),
+			gen.IntRange(0, 25),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 11: Metrics 平均时间合理性
+// 对于任何 WorkerPool 实例，AvgTaskDuration 应该在合理范围内（大于0且小于最长任务时间）
+// Validates: Requirements 4.5
+func TestProperty_MetricsAvgTaskDurationReasonable(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Metrics AvgTaskDuration is reasonable (>0 and <= max task duration)",
+		prop.ForAll(
+			func(workerCount, taskCount int) bool {
+				if workerCount < 1 {
+					workerCount = 1
+				}
+				if taskCount < 1 {
+					taskCount = 1
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				assert.NoError(t, err, "Failed to create worker pool")
+				if err != nil {
+					return false
+				}
+				defer wp.Close()
+
+				// Start goroutine to drain results
+				resultsDone := make(chan bool)
+				go func() {
+					for range taskCount {
+						<-wp.Results()
+					}
+					resultsDone <- true
+				}()
+
+				// Define task duration
+				taskDuration := 50 * time.Millisecond
+
+				// Submit tasks with known duration
+				for i := range taskCount {
+					err := wp.Submit(Task[int]{
+						Fn: func() (int, error) {
+							time.Sleep(taskDuration)
+							return i, nil
+						},
+					})
+					assert.NoError(t, err, "Failed to submit task")
+					if err != nil {
+						return false
+					}
+				}
+
+				// Wait for all results to be processed
+				<-resultsDone
+
+				// Check metrics
+				metrics := wp.Metrics()
+
+				// Average duration should be greater than 0
+				if metrics.AvgTaskDuration <= 0 {
+					t.Logf("AvgTaskDuration should be > 0, got %v", metrics.AvgTaskDuration)
+					return false
+				}
+
+				// Average duration should be reasonable (within expected range)
+				// It should be at least the task duration (accounting for some overhead)
+				// and not exceed it by too much (allowing for some scheduling overhead)
+				minExpected := taskDuration
+				maxExpected := taskDuration * 2 // Allow 2x for overhead
+
+				if metrics.AvgTaskDuration < minExpected {
+					t.Logf("AvgTaskDuration (%v) is less than expected minimum (%v)",
+						metrics.AvgTaskDuration, minExpected)
+					return false
+				}
+
+				if metrics.AvgTaskDuration > maxExpected {
+					t.Logf("AvgTaskDuration (%v) exceeds expected maximum (%v)",
+						metrics.AvgTaskDuration, maxExpected)
+					return false
+				}
+
+				return true
+			},
+			gen.IntRange(1, 10),
+			gen.IntRange(5, 30),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 12: GenerateBuffered 缓冲行为
+// 对于任何缓冲大小和值序列，GenerateBuffered 应该能够在不阻塞的情况下发送至少 bufferSize 个值
+// Validates: Requirements 5.1
+func TestProperty_GenerateBufferedNonBlocking(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("GenerateBuffered sends at least bufferSize values without blocking",
+		prop.ForAll(
+			func(bufferSize int, valueCount int) bool {
+				// Ensure valid inputs
+				if bufferSize < 1 {
+					bufferSize = 1
+				}
+				if valueCount < bufferSize {
+					valueCount = bufferSize
+				}
+				if valueCount > 100 {
+					valueCount = 100 // Cap for reasonable test time
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+
+				// Generate values
+				values := make([]int, valueCount)
+				for i := range values {
+					values[i] = i
+				}
+
+				// Create buffered channel
+				ch, err := c.GenerateBuffered(ctx, bufferSize, values...)
+				assert.NoError(t, err, "GenerateBuffered should not return error")
+				if err != nil {
+					return false
+				}
+
+				// The key property: the goroutine should be able to send at least
+				// bufferSize values without blocking (i.e., without needing a receiver)
+				// We verify this by waiting a short time and then checking that
+				// at least bufferSize values are available in the buffer
+
+				// Give the goroutine time to send values to the buffer
+				time.Sleep(50 * time.Millisecond)
+
+				// Now read values - at least bufferSize should be immediately available
+				// (they should already be in the buffer)
+				receivedCount := 0
+				timeout := time.After(10 * time.Millisecond) // Very short timeout
+
+				// Try to read bufferSize values quickly
+				for i := 0; i < bufferSize; i++ {
+					select {
+					case _, ok := <-ch:
+						if !ok {
+							// Channel closed early, which is fine if we got enough values
+							if receivedCount >= bufferSize {
+								// Drain remaining
+								for range ch {
+								}
+								return true
+							}
+							t.Logf("Channel closed after only %d values (expected at least %d)",
+								receivedCount, bufferSize)
+							return false
+						}
+						receivedCount++
+					case <-timeout:
+						// Timeout means values weren't buffered
+						t.Logf("Timeout after receiving %d values (expected at least %d buffered)",
+							receivedCount, bufferSize)
+						// Drain remaining
+						for range ch {
+						}
+						return false
+					}
+				}
+
+				// Drain remaining values
+				for range ch {
+				}
+
+				// We successfully read at least bufferSize values quickly
+				return receivedCount >= bufferSize
+			},
+			gen.IntRange(1, 50),
+			gen.IntRange(1, 100),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 13: RepeatBuffered 缓冲行为
+// 对于任何缓冲大小和值序列，RepeatBuffered 应该能够在不阻塞的情况下发送至少 bufferSize 个值
+// Validates: Requirements 5.2
+func TestProperty_RepeatBufferedNonBlocking(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("RepeatBuffered sends at least bufferSize values without blocking",
+		prop.ForAll(
+			func(bufferSize int, valueCount int) bool {
+				// Ensure valid inputs
+				if bufferSize < 1 {
+					bufferSize = 1
+				}
+				if valueCount < 1 {
+					valueCount = 1
+				}
+				if valueCount > 20 {
+					valueCount = 20 // Keep it reasonable
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+
+				c := NewChanx[int]()
+
+				// Generate values
+				values := make([]int, valueCount)
+				for i := range values {
+					values[i] = i
+				}
+
+				// Create buffered repeating channel
+				ch, err := c.RepeatBuffered(ctx, bufferSize, values...)
+				assert.NoError(t, err, "RepeatBuffered should not return error")
+				if err != nil {
+					return false
+				}
+
+				// The key property: the goroutine should be able to send at least
+				// bufferSize values without blocking (i.e., without needing a receiver)
+				// We verify this by waiting a short time and then checking that
+				// at least bufferSize values are available in the buffer
+
+				// Give the goroutine time to send values to the buffer
+				time.Sleep(50 * time.Millisecond)
+
+				// Now read values - at least bufferSize should be immediately available
+				// (they should already be in the buffer)
+				receivedCount := 0
+				timeout := time.After(10 * time.Millisecond) // Very short timeout
+
+				// Try to read bufferSize values quickly
+				for i := 0; i < bufferSize; i++ {
+					select {
+					case _, ok := <-ch:
+						if !ok {
+							// Channel closed early (shouldn't happen with Repeat)
+							t.Logf("Channel closed unexpectedly after %d values", receivedCount)
+							return false
+						}
+						receivedCount++
+					case <-timeout:
+						// Timeout means values weren't buffered
+						t.Logf("Timeout after receiving %d values (expected at least %d buffered)",
+							receivedCount, bufferSize)
+						cancel()
+						// Drain remaining
+						for range ch {
+						}
+						return false
+					}
+				}
+
+				// Cancel context to stop the repeat
+				cancel()
+
+				// Drain remaining values
+				for range ch {
+				}
+
+				// We successfully read at least bufferSize values quickly
+				return receivedCount >= bufferSize
+			},
+			gen.IntRange(1, 50),
+			gen.IntRange(1, 20),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 16: WorkerPool 创建错误详细性
+// Validates: Requirements 7.1
+func TestProperty_WorkerPoolCreationErrorDetail(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("NewWorkerPool returns detailed error for invalid worker count",
+		prop.ForAll(
+			func(invalidWorkerCount int) bool {
+				ctx := context.Background()
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, invalidWorkerCount)
+
+				// Should return an error
+				if err == nil {
+					t.Logf("Expected error for worker count %d, got nil", invalidWorkerCount)
+					return false
+				}
+
+				// Should be nil pool
+				if wp != nil {
+					t.Logf("Expected nil pool for invalid worker count, got non-nil")
+					return false
+				}
+
+				// Error should wrap ErrInvalidWorkerCount
+				if !errors.Is(err, ErrInvalidWorkerCount) {
+					t.Logf("Error should wrap ErrInvalidWorkerCount, got: %v", err)
+					return false
+				}
+
+				// Error message should contain the invalid value
+				errMsg := err.Error()
+				if !contains(errMsg, fmt.Sprintf("%d", invalidWorkerCount)) {
+					t.Logf("Error message should contain worker count %d, got: %s", invalidWorkerCount, errMsg)
+					return false
+				}
+
+				return true
+			},
+			gen.IntRange(-100, 0), // Invalid worker counts (0 and negative)
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Helper function to check if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}())
+}
+
+// Feature: chanx-optimization, Property 17: 任务提交错误详细性
+// Validates: Requirements 7.2
+func TestProperty_TaskSubmissionErrorDetail(t *testing.T) {
+	properties := gopter.NewProperties(nil)
+
+	properties.Property("Submit returns detailed error when pool is closed",
+		prop.ForAll(
+			func(workerCount int) bool {
+				ctx, cancel := context.WithCancel(context.Background())
+
+				c := NewChanx[int]()
+				wp, err := c.NewWorkerPool(ctx, workerCount)
+				if err != nil {
+					t.Logf("Failed to create worker pool: %v", err)
+					return false
+				}
+
+				// Start goroutine to drain results
+				go func() {
+					for range wp.Results() {
+						// Drain all results
+					}
+				}()
+
+				// Cancel context to close the pool
+				cancel()
+
+				// Wait a bit for cancellation to propagate
+				time.Sleep(50 * time.Millisecond)
+
+				// Try to submit a task after cancellation
+				err = wp.Submit(Task[int]{
+					Fn: func() (int, error) {
+						return 1, nil
+					},
+				})
+
+				wp.Close()
+
+				// Should return an error
+				if err == nil {
+					t.Logf("Expected error when submitting to closed pool, got nil")
+					return false
+				}
+
+				// Error should wrap either ErrContextCancelled or ErrPoolClosed
+				if !errors.Is(err, ErrContextCancelled) && !errors.Is(err, ErrPoolClosed) {
+					t.Logf("Error should wrap ErrContextCancelled or ErrPoolClosed, got: %v", err)
+					return false
+				}
+
+				// Error message should be descriptive
+				errMsg := err.Error()
+				if len(errMsg) == 0 {
+					t.Logf("Error message should not be empty")
+					return false
+				}
+
+				return true
+			},
+			gen.IntRange(1, 10),
+		))
+
+	properties.TestingRun(t, gopter.ConsoleReporter(false))
+}
+
+// Feature: chanx-optimization, Property 14: Context 取消后 Goroutine 清理
+// 对于任何 Chanx 函数，当 context 被取消后，所有相关 goroutine 应该在 1 秒内退出
+// Validates: Requirements 6.3
+func TestProperty_ContextCancellationGoroutineCleanup(t *testing.T) {
+	// Test each function type individually to avoid timeout
+	testCases := []struct {
+		name string
+		fn   func(context.Context, *Chanx[int])
+	}{
+		{
+			name: "Generate",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				ch := c.Generate(ctx, 1, 2, 3, 4, 5)
+				for i := 0; i < 3; i++ {
+					select {
+					case <-ch:
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			},
+		},
+		{
+			name: "Repeat",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				ch := c.Repeat(ctx, 1, 2, 3)
+				for i := 0; i < 3; i++ {
+					select {
+					case <-ch:
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			},
+		},
+		{
+			name: "RepeatFn",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				ch := c.RepeatFn(ctx, func() int { return 42 })
+				for i := 0; i < 3; i++ {
+					select {
+					case <-ch:
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			},
+		},
+		{
+			name: "Take",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				source := c.Repeat(ctx, 1, 2, 3)
+				taken := c.Take(ctx, source, 5)
+				for i := 0; i < 3; i++ {
+					select {
+					case <-taken:
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			},
+		},
+		{
+			name: "FanIn",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				ch1 := c.Repeat(ctx, 1)
+				ch2 := c.Repeat(ctx, 2)
+				merged := c.FanIn(ctx, ch1, ch2)
+				for i := 0; i < 3; i++ {
+					select {
+					case <-merged:
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			},
+		},
+		{
+			name: "Tee",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				source := c.Repeat(ctx, 1, 2, 3)
+				out1, out2 := c.Tee(ctx, source)
+				for i := 0; i < 2; i++ {
+					select {
+					case <-out1:
+					case <-time.After(50 * time.Millisecond):
+					}
+					select {
+					case <-out2:
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			},
+		},
+		{
+			name: "Bridge",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				chanStream := make(chan (<-chan int), 2)
+				bridged := c.Bridge(ctx, chanStream)
+
+				go func() {
+					defer close(chanStream)
+					for i := 0; i < 2; i++ {
+						select {
+						case chanStream <- c.Generate(ctx, i, i+1):
+						case <-ctx.Done():
+							return
+						}
+					}
+				}()
+
+				for i := 0; i < 3; i++ {
+					select {
+					case <-bridged:
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Record initial goroutine count
+			initialGoroutines := runtime.NumGoroutine()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			c := NewChanx[int]()
+
+			// Run the test function
+			tc.fn(ctx, c)
+
+			// Cancel context
+			cancel()
+
+			// Wait for goroutines to clean up (1 second as per requirement)
+			time.Sleep(1 * time.Second)
+
+			// Check goroutine count
+			finalGoroutines := runtime.NumGoroutine()
+
+			// Allow some tolerance for background goroutines (up to 5 extra)
+			if finalGoroutines > initialGoroutines+5 {
+				t.Errorf(
+					"Goroutine leak detected: initial=%d, final=%d, diff=%d",
+					initialGoroutines,
+					finalGoroutines,
+					finalGoroutines-initialGoroutines,
+				)
+			}
+		})
+	}
+}
+
+// Feature: chanx-optimization, Property 15: 操作完成后 Goroutine 清理
+// 对于任何 Chanx 函数，当所有 channel 操作完成后，不应该有遗留的 goroutine
+// Validates: Requirements 6.4
+func TestProperty_OperationCompletionGoroutineCleanup(t *testing.T) {
+	// Test each function type to ensure goroutines are cleaned up after completion
+	testCases := []struct {
+		name string
+		fn   func(context.Context, *Chanx[int])
+	}{
+		{
+			name: "Generate completes",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				ch := c.Generate(ctx, 1, 2, 3)
+				// Read all values
+				for range ch {
+				}
+			},
+		},
+		{
+			name: "Take completes",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				source := c.Generate(ctx, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+				taken := c.Take(ctx, source, 5)
+				// Read all taken values
+				for range taken {
+				}
+			},
+		},
+		{
+			name: "FanIn completes",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				ch1 := c.Generate(ctx, 1, 2, 3)
+				ch2 := c.Generate(ctx, 4, 5, 6)
+				merged := c.FanIn(ctx, ch1, ch2)
+				// Read all values
+				for range merged {
+				}
+			},
+		},
+		{
+			name: "Tee completes",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				source := c.Generate(ctx, 1, 2, 3)
+				out1, out2 := c.Tee(ctx, source)
+
+				// Read from both outputs concurrently
+				var wg sync.WaitGroup
+				wg.Add(2)
+
+				go func() {
+					defer wg.Done()
+					for range out1 {
+					}
+				}()
+
+				go func() {
+					defer wg.Done()
+					for range out2 {
+					}
+				}()
+
+				wg.Wait()
+			},
+		},
+		{
+			name: "Bridge completes",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				chanStream := make(chan (<-chan int))
+				bridged := c.Bridge(ctx, chanStream)
+
+				// Send channels
+				go func() {
+					defer close(chanStream)
+					chanStream <- c.Generate(ctx, 1, 2, 3)
+					chanStream <- c.Generate(ctx, 4, 5, 6)
+				}()
+
+				// Read all values
+				for range bridged {
+				}
+			},
+		},
+		{
+			name: "OrDone completes",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				source := c.Generate(ctx, 1, 2, 3, 4, 5)
+				output := c.OrDone(ctx, source)
+				// Read all values
+				for range output {
+				}
+			},
+		},
+		{
+			name: "Or completes",
+			fn: func(ctx context.Context, c *Chanx[int]) {
+				ch1 := c.Generate(ctx, 1, 2, 3)
+				ch2 := c.Generate(ctx, 4, 5, 6)
+				ch3 := c.Generate(ctx, 7, 8, 9)
+				orChan := c.Or(ch1, ch2, ch3)
+				// Wait for Or to close
+				for range orChan {
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Record initial goroutine count
+			initialGoroutines := runtime.NumGoroutine()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			c := NewChanx[int]()
+
+			// Run the test function (should complete naturally)
+			tc.fn(ctx, c)
+
+			// Give a short time for goroutines to clean up after completion
+			time.Sleep(200 * time.Millisecond)
+
+			// Check goroutine count
+			finalGoroutines := runtime.NumGoroutine()
+
+			// Allow some tolerance for background goroutines (up to 3 extra)
+			// After normal completion, there should be no leaked goroutines
+			if finalGoroutines > initialGoroutines+3 {
+				t.Errorf(
+					"Goroutine leak detected after completion: initial=%d, final=%d, diff=%d",
+					initialGoroutines,
+					finalGoroutines,
+					finalGoroutines-initialGoroutines,
+				)
+			}
+		})
+	}
 }

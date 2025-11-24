@@ -2,6 +2,8 @@ package chanx
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1258,6 +1260,109 @@ func TestBridge_ConcurrentValues(t *testing.T) {
 	}
 }
 
+// TestBridge_ContextCancellationWithin100ms tests that Bridge stops within 100ms of context cancellation
+// Validates: Requirements 2.3
+func TestBridge_ContextCancellationWithin100ms(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := NewChanx[int]()
+
+	// Create a channel of channels
+	chanStream := make(chan (<-chan int))
+
+	// Start Bridge
+	bridged := c.Bridge(ctx, chanStream)
+
+	// Send channels that generate values
+	go func() {
+		defer close(chanStream)
+
+		for range 3 {
+			innerChan := c.RepeatFn(ctx, func() int {
+				time.Sleep(10 * time.Millisecond)
+				return 1
+			})
+			select {
+			case chanStream <- innerChan:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Read a few values to ensure Bridge is running
+	readCount := 0
+	for readCount < 5 {
+		select {
+		case _, ok := <-bridged:
+			if !ok {
+				// Channel closed early
+				cancel()
+				return
+			}
+			readCount++
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("Timeout waiting for values")
+		}
+	}
+
+	// Cancel context and measure time to close
+	startTime := time.Now()
+	cancel()
+
+	// Channel should close within 100ms
+	timeout := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case _, ok := <-bridged:
+			if !ok {
+				// Channel closed as expected
+				elapsed := time.Since(startTime)
+				assert.LessOrEqual(
+					t,
+					elapsed,
+					100*time.Millisecond,
+					"Bridge should stop within 100ms of context cancellation",
+				)
+				return
+			}
+		case <-timeout:
+			t.Fatal("Bridge did not close within 100ms after context cancellation")
+		}
+	}
+}
+
+// TestBridge_EmptyChannelStreamClosesImmediately tests that Bridge closes immediately when given an empty channel stream
+// Validates: Requirements 2.4
+func TestBridge_EmptyChannelStreamClosesImmediately(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	c := NewChanx[int]()
+
+	// Create an empty channel of channels
+	chanStream := make(chan (<-chan int))
+
+	// Start Bridge
+	bridged := c.Bridge(ctx, chanStream)
+
+	// Close the channel stream immediately (empty stream)
+	close(chanStream)
+
+	// Bridge should close immediately
+	timeout := time.After(50 * time.Millisecond)
+	select {
+	case _, ok := <-bridged:
+		if !ok {
+			// Channel closed as expected
+			return
+		}
+		t.Fatal("Should not receive any values from empty channel stream")
+	case <-timeout:
+		t.Fatal("Bridge did not close immediately for empty channel stream")
+	}
+}
+
 // Unit tests for Or
 
 func TestOr_AnyChannelCloses(t *testing.T) {
@@ -1620,5 +1725,800 @@ func TestOrDone_DifferentTypes(t *testing.T) {
 		}
 
 		assert.Equal(t, values, received, "Should forward all struct values")
+	})
+}
+
+// Benchmark tests for Or function
+
+// BenchmarkOr_10Channels benchmarks Or function with 10 input channels
+func BenchmarkOr_10Channels(b *testing.B) {
+	c := NewChanx[struct{}]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		// Create 10 channels
+		channels := make([]<-chan struct{}, 10)
+		closeFuncs := make([]context.CancelFunc, 10)
+
+		for j := range 10 {
+			ctx, cancel := context.WithCancel(context.Background())
+			closeFuncs[j] = cancel
+			channels[j] = c.RepeatFn(ctx, func() struct{} {
+				return struct{}{}
+			})
+		}
+
+		b.StartTimer()
+		// Call Or
+		orChan := c.Or(channels...)
+
+		// Close first channel to trigger Or completion
+		closeFuncs[0]()
+
+		// Wait for Or channel to close
+		for range orChan {
+		}
+		b.StopTimer()
+
+		// Clean up
+		for _, cancel := range closeFuncs {
+			cancel()
+		}
+	}
+}
+
+// BenchmarkOr_50Channels benchmarks Or function with 50 input channels
+func BenchmarkOr_50Channels(b *testing.B) {
+	c := NewChanx[struct{}]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		// Create 50 channels
+		channels := make([]<-chan struct{}, 50)
+		closeFuncs := make([]context.CancelFunc, 50)
+
+		for j := range 50 {
+			ctx, cancel := context.WithCancel(context.Background())
+			closeFuncs[j] = cancel
+			channels[j] = c.RepeatFn(ctx, func() struct{} {
+				return struct{}{}
+			})
+		}
+
+		b.StartTimer()
+		// Call Or
+		orChan := c.Or(channels...)
+
+		// Close first channel to trigger Or completion
+		closeFuncs[0]()
+
+		// Wait for Or channel to close
+		for range orChan {
+		}
+		b.StopTimer()
+
+		// Clean up
+		for _, cancel := range closeFuncs {
+			cancel()
+		}
+	}
+}
+
+// BenchmarkOr_100Channels benchmarks Or function with 100 input channels
+func BenchmarkOr_100Channels(b *testing.B) {
+	c := NewChanx[struct{}]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		// Create 100 channels
+		channels := make([]<-chan struct{}, 100)
+		closeFuncs := make([]context.CancelFunc, 100)
+
+		for j := range 100 {
+			ctx, cancel := context.WithCancel(context.Background())
+			closeFuncs[j] = cancel
+			channels[j] = c.RepeatFn(ctx, func() struct{} {
+				return struct{}{}
+			})
+		}
+
+		b.StartTimer()
+		// Call Or
+		orChan := c.Or(channels...)
+
+		// Close first channel to trigger Or completion
+		closeFuncs[0]()
+
+		// Wait for Or channel to close
+		for range orChan {
+		}
+		b.StopTimer()
+
+		// Clean up
+		for _, cancel := range closeFuncs {
+			cancel()
+		}
+	}
+}
+
+// BenchmarkOr_500Channels benchmarks Or function with 500 input channels
+func BenchmarkOr_500Channels(b *testing.B) {
+	c := NewChanx[struct{}]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		// Create 500 channels
+		channels := make([]<-chan struct{}, 500)
+		closeFuncs := make([]context.CancelFunc, 500)
+
+		for j := range 500 {
+			ctx, cancel := context.WithCancel(context.Background())
+			closeFuncs[j] = cancel
+			channels[j] = c.RepeatFn(ctx, func() struct{} {
+				return struct{}{}
+			})
+		}
+
+		b.StartTimer()
+		// Call Or
+		orChan := c.Or(channels...)
+
+		// Close first channel to trigger Or completion
+		closeFuncs[0]()
+
+		// Wait for Or channel to close
+		for range orChan {
+		}
+		b.StopTimer()
+
+		// Clean up
+		for _, cancel := range closeFuncs {
+			cancel()
+		}
+	}
+}
+
+// BenchmarkBridge_LowConcurrency benchmarks Bridge with low concurrency (5 channels, 10 values each)
+// Validates: Requirements 2.1
+func BenchmarkBridge_LowConcurrency(b *testing.B) {
+	c := NewChanx[int]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Create channel stream
+		chanStream := make(chan (<-chan int))
+
+		// Start Bridge
+		bridged := c.Bridge(ctx, chanStream)
+
+		// Send channels
+		go func() {
+			defer close(chanStream)
+			for j := 0; j < 5; j++ {
+				values := make([]int, 10)
+				for k := range values {
+					values[k] = j*10 + k
+				}
+				chanStream <- c.Generate(ctx, values...)
+			}
+		}()
+
+		b.StartTimer()
+		// Read all values
+		for range bridged {
+		}
+		b.StopTimer()
+
+		cancel()
+	}
+}
+
+// BenchmarkBridge_MediumConcurrency benchmarks Bridge with medium concurrency (10 channels, 20 values each)
+// Validates: Requirements 2.1
+func BenchmarkBridge_MediumConcurrency(b *testing.B) {
+	c := NewChanx[int]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Create channel stream
+		chanStream := make(chan (<-chan int))
+
+		// Start Bridge
+		bridged := c.Bridge(ctx, chanStream)
+
+		// Send channels
+		go func() {
+			defer close(chanStream)
+			for j := 0; j < 10; j++ {
+				values := make([]int, 20)
+				for k := range values {
+					values[k] = j*100 + k
+				}
+				chanStream <- c.Generate(ctx, values...)
+			}
+		}()
+
+		b.StartTimer()
+		// Read all values
+		for range bridged {
+		}
+		b.StopTimer()
+
+		cancel()
+	}
+}
+
+// BenchmarkBridge_HighConcurrency benchmarks Bridge with high concurrency (20 channels, 50 values each)
+// Validates: Requirements 2.1
+func BenchmarkBridge_HighConcurrency(b *testing.B) {
+	c := NewChanx[int]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Create channel stream
+		chanStream := make(chan (<-chan int))
+
+		// Start Bridge
+		bridged := c.Bridge(ctx, chanStream)
+
+		// Send channels
+		go func() {
+			defer close(chanStream)
+			for j := 0; j < 20; j++ {
+				values := make([]int, 50)
+				for k := range values {
+					values[k] = j*1000 + k
+				}
+				chanStream <- c.Generate(ctx, values...)
+			}
+		}()
+
+		b.StartTimer()
+		// Read all values
+		for range bridged {
+		}
+		b.StopTimer()
+
+		cancel()
+	}
+}
+
+// BenchmarkSubmitBatch_vs_Individual compares batch submission vs individual submission
+// Validates: Requirements 3.4
+func BenchmarkSubmitBatch_vs_Individual(b *testing.B) {
+	taskCounts := []int{100, 500, 1000}
+
+	for _, taskCount := range taskCounts {
+		// Benchmark individual submission
+		b.Run(fmt.Sprintf("Individual_%d", taskCount), func(b *testing.B) {
+			c := NewChanx[int]()
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				ctx, cancel := context.WithCancel(context.Background())
+				wp, _ := c.NewWorkerPool(ctx, 5)
+
+				// Drain results
+				go func() {
+					for range wp.Results() {
+					}
+				}()
+
+				b.StartTimer()
+				// Submit tasks individually
+				for j := 0; j < taskCount; j++ {
+					_ = wp.Submit(Task[int]{
+						Fn: func() (int, error) {
+							return 1, nil
+						},
+					})
+				}
+				b.StopTimer()
+
+				wp.Close()
+				cancel()
+			}
+		})
+
+		// Benchmark batch submission
+		b.Run(fmt.Sprintf("Batch_%d", taskCount), func(b *testing.B) {
+			c := NewChanx[int]()
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				ctx, cancel := context.WithCancel(context.Background())
+				wp, _ := c.NewWorkerPool(ctx, 5)
+
+				// Drain results
+				go func() {
+					for range wp.Results() {
+					}
+				}()
+
+				// Create tasks
+				tasks := make([]Task[int], taskCount)
+				for j := range taskCount {
+					tasks[j] = Task[int]{
+						Fn: func() (int, error) {
+							return 1, nil
+						},
+					}
+				}
+
+				b.StartTimer()
+				// Submit tasks in batch
+				_ = wp.SubmitBatch(tasks)
+				b.StopTimer()
+
+				wp.Close()
+				cancel()
+			}
+		})
+	}
+}
+
+// BenchmarkSubmitBatch_1000Tasks benchmarks batch submission with 1000 tasks
+// Validates: Requirements 3.4
+func BenchmarkSubmitBatch_1000Tasks(b *testing.B) {
+	c := NewChanx[int]()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		ctx, cancel := context.WithCancel(context.Background())
+		wp, _ := c.NewWorkerPool(ctx, 10)
+
+		// Drain results
+		go func() {
+			for range wp.Results() {
+			}
+		}()
+
+		// Create 1000 tasks
+		tasks := make([]Task[int], 1000)
+		for j := range 1000 {
+			value := j
+			tasks[j] = Task[int]{
+				Fn: func() (int, error) {
+					return value, nil
+				},
+			}
+		}
+
+		b.StartTimer()
+		result := wp.SubmitBatch(tasks)
+		b.StopTimer()
+
+		if result.SubmittedCount != 1000 {
+			b.Fatalf("Expected 1000 tasks submitted, got %d", result.SubmittedCount)
+		}
+
+		wp.Close()
+		cancel()
+	}
+}
+
+// Unit tests for GenerateBuffered function
+
+func TestGenerateBuffered_NegativeBufferSize(t *testing.T) {
+	ctx := context.Background()
+	c := NewChanx[int]()
+
+	// Try to create with negative buffer size
+	ch, err := c.GenerateBuffered(ctx, -1, 1, 2, 3)
+
+	// Should return error
+	assert.Error(t, err, "Should return error for negative buffer size")
+	assert.Nil(t, ch, "Channel should be nil when error occurs")
+	assert.Contains(t, err.Error(), "non-negative", "Error message should mention non-negative")
+}
+
+func TestGenerateBuffered_ZeroBufferSize(t *testing.T) {
+	ctx := context.Background()
+	c := NewChanx[int]()
+
+	// Create with buffer size 0 (unbuffered)
+	ch, err := c.GenerateBuffered(ctx, 0, 1, 2, 3)
+
+	// Should succeed
+	assert.NoError(t, err, "Should not return error for buffer size 0")
+	assert.NotNil(t, ch, "Channel should not be nil")
+
+	// Collect all values
+	var received []int
+	for v := range ch {
+		received = append(received, v)
+	}
+
+	assert.Equal(t, []int{1, 2, 3}, received, "Should receive all values")
+}
+
+func TestGenerateBuffered_PositiveBufferSize(t *testing.T) {
+	ctx := context.Background()
+	c := NewChanx[int]()
+
+	// Create with buffer size 10
+	ch, err := c.GenerateBuffered(ctx, 10, 1, 2, 3, 4, 5)
+
+	// Should succeed
+	assert.NoError(t, err, "Should not return error for positive buffer size")
+	assert.NotNil(t, ch, "Channel should not be nil")
+
+	// Collect all values
+	var received []int
+	for v := range ch {
+		received = append(received, v)
+	}
+
+	assert.Equal(t, []int{1, 2, 3, 4, 5}, received, "Should receive all values")
+}
+
+func TestGenerateBuffered_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := NewChanx[int]()
+
+	// Generate many values with buffer
+	values := make([]int, 100)
+	for i := range values {
+		values[i] = i
+	}
+
+	ch, err := c.GenerateBuffered(ctx, 10, values...)
+	assert.NoError(t, err)
+
+	// Read a few values
+	for range 5 {
+		<-ch
+	}
+
+	// Cancel context
+	cancel()
+
+	// Channel should close soon
+	timeout := time.After(500 * time.Millisecond)
+	closed := false
+	for !closed {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				closed = true
+			}
+		case <-timeout:
+			t.Fatal("Channel did not close after context cancellation")
+		}
+	}
+
+	assert.True(t, closed, "Channel should close after context cancellation")
+}
+
+// Unit tests for RepeatBuffered function
+
+func TestRepeatBuffered_NegativeBufferSize(t *testing.T) {
+	ctx := context.Background()
+	c := NewChanx[int]()
+
+	// Try to create with negative buffer size
+	ch, err := c.RepeatBuffered(ctx, -1, 1, 2, 3)
+
+	// Should return error
+	assert.Error(t, err, "Should return error for negative buffer size")
+	assert.Nil(t, ch, "Channel should be nil when error occurs")
+	assert.Contains(t, err.Error(), "non-negative", "Error message should mention non-negative")
+}
+
+func TestRepeatBuffered_ZeroBufferSize(t *testing.T) {
+	ctx := t.Context()
+	c := NewChanx[int]()
+
+	// Create with buffer size 0 (unbuffered)
+	ch, err := c.RepeatBuffered(ctx, 0, 1, 2, 3)
+
+	// Should succeed
+	assert.NoError(t, err, "Should not return error for buffer size 0")
+	assert.NotNil(t, ch, "Channel should not be nil")
+
+	// Read a few cycles to verify it works
+	for i := 0; i < 6; i++ {
+		expected := (i % 3) + 1
+		select {
+		case v := <-ch:
+			assert.Equal(t, expected, v, "Should receive correct value")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Timeout reading value")
+		}
+	}
+}
+
+func TestRepeatBuffered_PositiveBufferSize(t *testing.T) {
+	ctx := t.Context()
+	c := NewChanx[int]()
+
+	// Create with buffer size 10
+	ch, err := c.RepeatBuffered(ctx, 10, 1, 2, 3)
+
+	// Should succeed
+	assert.NoError(t, err, "Should not return error for positive buffer size")
+	assert.NotNil(t, ch, "Channel should not be nil")
+
+	// Read multiple cycles
+	for i := 0; i < 9; i++ {
+		expected := (i % 3) + 1
+		select {
+		case v := <-ch:
+			assert.Equal(t, expected, v, "Should receive correct value in cycle")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Timeout reading value")
+		}
+	}
+}
+
+func TestRepeatBuffered_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := NewChanx[int]()
+
+	ch, err := c.RepeatBuffered(ctx, 5, 1, 2, 3)
+	assert.NoError(t, err)
+
+	// Read a few values
+	for range 5 {
+		select {
+		case <-ch:
+			// Successfully read value
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Timeout reading values")
+		}
+	}
+
+	// Cancel context
+	cancel()
+
+	// Channel should close soon
+	timeout := time.After(500 * time.Millisecond)
+	closed := false
+	for !closed {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				closed = true
+			}
+		case <-timeout:
+			t.Fatal("Channel did not close after context cancellation")
+		}
+	}
+
+	assert.True(t, closed, "Channel should close after context cancellation")
+}
+
+// Unit tests for error handling
+
+// TestErrorHandling_ContextCancellation tests that context cancellation returns appropriate error
+// Validates: Requirements 7.3
+func TestErrorHandling_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := NewChanx[int]()
+	wp, err := c.NewWorkerPool(ctx, 3)
+	assert.NoError(t, err, "Failed to create worker pool")
+
+	// Start goroutine to drain results
+	go func() {
+		for range wp.Results() {
+			// Drain all results
+		}
+	}()
+
+	// Cancel context immediately
+	cancel()
+
+	// Wait for cancellation to propagate
+	time.Sleep(50 * time.Millisecond)
+
+	// Try to submit a task after cancellation
+	err = wp.Submit(Task[int]{
+		Fn: func() (int, error) {
+			return 1, nil
+		},
+	})
+
+	wp.Close()
+
+	// Should return an error
+	assert.Error(t, err, "Submit should fail after context cancellation")
+
+	// Error should wrap ErrContextCancelled or ErrPoolClosed
+	assert.True(
+		t,
+		errors.Is(err, ErrContextCancelled) || errors.Is(err, ErrPoolClosed),
+		"Error should wrap ErrContextCancelled or ErrPoolClosed, got: %v",
+		err,
+	)
+
+	// Error message should mention context cancellation
+	errMsg := err.Error()
+	assert.Contains(
+		t,
+		errMsg,
+		"context",
+		"Error message should mention context, got: %s",
+		errMsg,
+	)
+}
+
+// TestErrorHandling_PoolClosed tests that submitting to a closed pool returns appropriate error
+// Validates: Requirements 7.4
+func TestErrorHandling_PoolClosed(t *testing.T) {
+	ctx := context.Background()
+
+	c := NewChanx[int]()
+	wp, err := c.NewWorkerPool(ctx, 3)
+	assert.NoError(t, err, "Failed to create worker pool")
+
+	// Start goroutine to drain results
+	go func() {
+		for range wp.Results() {
+			// Drain all results
+		}
+	}()
+
+	// Close the pool
+	wp.Close()
+
+	// Try to submit a task after closing
+	err = wp.Submit(Task[int]{
+		Fn: func() (int, error) {
+			return 1, nil
+		},
+	})
+
+	// Should return an error
+	assert.Error(t, err, "Submit should fail after pool is closed")
+
+	// Error should wrap ErrPoolClosed or ErrContextCancelled
+	assert.True(
+		t,
+		errors.Is(err, ErrPoolClosed) || errors.Is(err, ErrContextCancelled),
+		"Error should wrap ErrPoolClosed or ErrContextCancelled, got: %v",
+		err,
+	)
+
+	// Error message should be descriptive
+	errMsg := err.Error()
+	assert.NotEmpty(t, errMsg, "Error message should not be empty")
+}
+
+// TestErrorHandling_BatchSubmitContextCancellation tests that batch submit handles context cancellation correctly
+// Validates: Requirements 7.3
+func TestErrorHandling_BatchSubmitContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := NewChanx[int]()
+	wp, err := c.NewWorkerPool(ctx, 2)
+	assert.NoError(t, err, "Failed to create worker pool")
+
+	// Start goroutine to drain results
+	go func() {
+		for range wp.Results() {
+			// Drain all results
+		}
+	}()
+
+	// Create a batch of tasks
+	tasks := make([]Task[int], 10)
+	for i := range tasks {
+		tasks[i] = Task[int]{
+			Fn: func() (int, error) {
+				time.Sleep(100 * time.Millisecond)
+				return 1, nil
+			},
+		}
+	}
+
+	// Start batch submission in goroutine
+	resultChan := make(chan BatchSubmitResult)
+	go func() {
+		// Submit first task to block the pool
+		_ = wp.Submit(Task[int]{
+			Fn: func() (int, error) {
+				time.Sleep(200 * time.Millisecond)
+				return 1, nil
+			},
+		})
+
+		// Cancel context after a short delay
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+
+		// Try to submit batch after cancellation
+		result := wp.SubmitBatch(tasks)
+		resultChan <- result
+	}()
+
+	// Get the result
+	result := <-resultChan
+
+	wp.Close()
+
+	// Should have some errors
+	assert.NotEmpty(t, result.Errors, "Should have errors when context is cancelled")
+
+	// At least one error should wrap ErrContextCancelled or ErrPoolClosed
+	hasContextError := false
+	for _, err := range result.Errors {
+		if errors.Is(err, ErrContextCancelled) || errors.Is(err, ErrPoolClosed) {
+			hasContextError = true
+			// Error message should mention context or task number
+			errMsg := err.Error()
+			assert.NotEmpty(t, errMsg, "Error message should not be empty")
+			break
+		}
+	}
+	assert.True(
+		t,
+		hasContextError,
+		"At least one error should wrap ErrContextCancelled or ErrPoolClosed",
+	)
+}
+
+// TestErrorHandling_InvalidBufferSize tests that invalid buffer size returns appropriate error
+// Validates: Requirements 7.1
+func TestErrorHandling_InvalidBufferSize(t *testing.T) {
+	ctx := context.Background()
+	c := NewChanx[int]()
+
+	// Test GenerateBuffered with negative buffer size
+	t.Run("GenerateBuffered negative buffer", func(t *testing.T) {
+		ch, err := c.GenerateBuffered(ctx, -1, 1, 2, 3)
+
+		// Should return an error
+		assert.Error(t, err, "GenerateBuffered should fail with negative buffer size")
+		assert.Nil(t, ch, "Channel should be nil when error occurs")
+
+		// Error should wrap ErrInvalidBufferSize
+		assert.True(
+			t,
+			errors.Is(err, ErrInvalidBufferSize),
+			"Error should wrap ErrInvalidBufferSize, got: %v",
+			err,
+		)
+
+		// Error message should contain the invalid value
+		errMsg := err.Error()
+		assert.Contains(t, errMsg, "-1", "Error message should contain the invalid buffer size")
+	})
+
+	// Test RepeatBuffered with negative buffer size
+	t.Run("RepeatBuffered negative buffer", func(t *testing.T) {
+		ch, err := c.RepeatBuffered(ctx, -5, 1, 2, 3)
+
+		// Should return an error
+		assert.Error(t, err, "RepeatBuffered should fail with negative buffer size")
+		assert.Nil(t, ch, "Channel should be nil when error occurs")
+
+		// Error should wrap ErrInvalidBufferSize
+		assert.True(
+			t,
+			errors.Is(err, ErrInvalidBufferSize),
+			"Error should wrap ErrInvalidBufferSize, got: %v",
+			err,
+		)
+
+		// Error message should contain the invalid value
+		errMsg := err.Error()
+		assert.Contains(t, errMsg, "-5", "Error message should contain the invalid buffer size")
 	})
 }
