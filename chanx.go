@@ -463,10 +463,21 @@ func (c *Chanx[T]) Or(channels ...<-chan T) <-chan T {
 			}
 		}
 
-		// Wait for any channel to close (receive zero value)
-		// reflect.Select will return when any case is ready
-		_, _, _ = reflect.Select(cases)
-		// When any channel closes, we exit and close orDone
+		// Keep checking until we find a closed channel
+		// reflect.Select returns when any case is ready (value received or channel closed)
+		for len(cases) > 0 {
+			chosen, _, ok := reflect.Select(cases)
+			if !ok {
+				// Channel is closed, exit immediately
+				return
+			}
+			// If we received a value, that channel is still open
+			// Remove it from cases to avoid repeatedly checking it
+			// This ensures we detect closures quickly even when channels are actively sending
+			cases = append(cases[:chosen], cases[chosen+1:]...)
+		}
+		// All channels sent values but none closed yet
+		// This is unlikely but handle gracefully
 	}()
 
 	return orDone

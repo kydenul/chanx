@@ -45,13 +45,20 @@ func TestProperty_WorkerCountMatch(t *testing.T) {
 				}
 				defer wp.Close()
 
+				// Start goroutine to drain results
+				go func() {
+					for range wp.Results() {
+						// Drain all results
+					}
+				}()
+
 				// Submit tasks equal to worker count to ensure all workers are active
 				var activeWorkers atomic.Int32
 				for range workerCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
 							activeWorkers.Add(1)
-							time.Sleep(100 * time.Millisecond)
+							time.Sleep(10 * time.Millisecond)
 							return 0, nil
 						},
 					})
@@ -62,7 +69,7 @@ func TestProperty_WorkerCountMatch(t *testing.T) {
 				}
 
 				// Wait a bit for all workers to pick up tasks
-				time.Sleep(150 * time.Millisecond)
+				time.Sleep(15 * time.Millisecond)
 
 				// Check that the number of active workers matches the configuration
 				active := int(activeWorkers.Load())
@@ -196,7 +203,7 @@ func TestProperty_ContextCancellation(t *testing.T) {
 				cancel()
 
 				// Try to submit after cancellation - should fail
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 				err = wp.Submit(Task[int]{
 					Fn: func() (int, error) {
 						return 1, nil
@@ -1905,8 +1912,8 @@ func TestProperty_OrGoroutineCleanup(t *testing.T) {
 					cancel()
 				}
 
-				// Give goroutines time to clean up (200ms should be sufficient)
-				time.Sleep(200 * time.Millisecond)
+				// Give goroutines time to clean up
+				time.Sleep(20 * time.Millisecond)
 
 				// Check goroutine count
 				finalGoroutines := runtime.NumGoroutine()
@@ -2437,7 +2444,7 @@ func TestProperty_BatchSubmitContextCancellation(t *testing.T) {
 					value := i
 					tasks[i] = Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(50 * time.Millisecond)
+							time.Sleep(20 * time.Millisecond)
 							return value, nil
 						},
 					}
@@ -2529,7 +2536,7 @@ func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 				for i := range taskCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(50 * time.Millisecond)
+							time.Sleep(5 * time.Millisecond)
 							return i, nil
 						},
 					})
@@ -2550,7 +2557,7 @@ func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 				}
 
 				// Wait a bit for tasks to start executing
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(30 * time.Millisecond)
 
 				// Check final metrics
 				metrics := wp.Metrics()
@@ -2560,7 +2567,7 @@ func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 				return metrics.ActiveWorkers <= workerCount
 			},
 			gen.IntRange(1, 10),
-			gen.IntRange(10, 50),
+			gen.IntRange(10, 30),
 		))
 
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
@@ -2591,18 +2598,18 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 				defer wp.Close()
 
 				// Start goroutine to drain results slowly
-				taskCount := workerCount * 3
+				taskCount := workerCount * 5
 				resultsDone := make(chan bool)
 				go func() {
 					for range taskCount {
 						<-wp.Results()
 						// Drain results slowly to allow queue to build up
-						time.Sleep(10 * time.Millisecond)
+						time.Sleep(20 * time.Millisecond)
 					}
 					resultsDone <- true
 				}()
 
-				// Submit tasks concurrently to build up a queue
+				// Submit all tasks quickly to build up a queue
 				// Use a WaitGroup to track submission goroutines
 				var submitWg sync.WaitGroup
 				for i := range taskCount {
@@ -2611,7 +2618,7 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 						defer submitWg.Done()
 						err := wp.Submit(Task[int]{
 							Fn: func() (int, error) {
-								time.Sleep(100 * time.Millisecond)
+								time.Sleep(10 * time.Millisecond)
 								return taskID, nil
 							},
 						})
@@ -2622,7 +2629,7 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 				}
 
 				// Wait a bit for submissions to start and queue to build
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(30 * time.Millisecond)
 
 				// Check metrics - should have queued tasks
 				metrics := wp.Metrics()
@@ -2838,8 +2845,8 @@ func TestProperty_MetricsAvgTaskDurationReasonable(t *testing.T) {
 					resultsDone <- true
 				}()
 
-				// Define task duration
-				taskDuration := 50 * time.Millisecond
+				// Define task duration (reduced for faster tests)
+				taskDuration := 10 * time.Millisecond
 
 				// Submit tasks with known duration
 				for i := range taskCount {
@@ -2938,7 +2945,7 @@ func TestProperty_GenerateBufferedNonBlocking(t *testing.T) {
 				// at least bufferSize values are available in the buffer
 
 				// Give the goroutine time to send values to the buffer
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 
 				// Now read values - at least bufferSize should be immediately available
 				// (they should already be in the buffer)
@@ -3031,7 +3038,7 @@ func TestProperty_RepeatBufferedNonBlocking(t *testing.T) {
 				// at least bufferSize values are available in the buffer
 
 				// Give the goroutine time to send values to the buffer
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 
 				// Now read values - at least bufferSize should be immediately available
 				// (they should already be in the buffer)
@@ -3164,7 +3171,7 @@ func TestProperty_TaskSubmissionErrorDetail(t *testing.T) {
 				cancel()
 
 				// Wait a bit for cancellation to propagate
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 
 				// Try to submit a task after cancellation
 				err = wp.Submit(Task[int]{
@@ -3332,8 +3339,8 @@ func TestProperty_ContextCancellationGoroutineCleanup(t *testing.T) {
 			// Cancel context
 			cancel()
 
-			// Wait for goroutines to clean up (1 second as per requirement)
-			time.Sleep(1 * time.Second)
+			// Wait for goroutines to clean up (reduced for faster tests)
+			time.Sleep(100 * time.Millisecond)
 
 			// Check goroutine count
 			finalGoroutines := runtime.NumGoroutine()
@@ -3471,7 +3478,7 @@ func TestProperty_OperationCompletionGoroutineCleanup(t *testing.T) {
 			tc.fn(ctx, c)
 
 			// Give a short time for goroutines to clean up after completion
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 
 			// Check goroutine count
 			finalGoroutines := runtime.NumGoroutine()

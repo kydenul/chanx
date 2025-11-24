@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -401,11 +402,11 @@ func TestRepeatFn_FunctionWithSideEffects(t *testing.T) {
 
 	c := NewChanx[int]()
 
-	// Track how many times the function is called
-	callCount := 0
+	// Track how many times the function is called using atomic for thread safety
+	var callCount atomic.Int32
 	fn := func() int {
-		callCount++
-		return callCount * 10
+		count := callCount.Add(1)
+		return int(count) * 10
 	}
 
 	ch := c.RepeatFn(ctx, fn)
@@ -423,15 +424,16 @@ func TestRepeatFn_FunctionWithSideEffects(t *testing.T) {
 
 	// The function may be called one more time if it's already executing
 	// when we stop reading, so we check that it's at least the number we read
+	finalCount := int(callCount.Load())
 	assert.GreaterOrEqual(
 		t,
-		callCount,
+		finalCount,
 		readCount,
 		"Function should be called at least as many times as we read",
 	)
 	assert.LessOrEqual(
 		t,
-		callCount,
+		finalCount,
 		readCount+1,
 		"Function should not be called more than one extra time",
 	)
