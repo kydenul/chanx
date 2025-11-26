@@ -58,7 +58,7 @@ func TestProperty_WorkerCountMatch(t *testing.T) {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
 							activeWorkers.Add(1)
-							time.Sleep(10 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return 0, nil
 						},
 					})
@@ -69,7 +69,7 @@ func TestProperty_WorkerCountMatch(t *testing.T) {
 				}
 
 				// Wait a bit for all workers to pick up tasks
-				time.Sleep(15 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond)
 
 				// Check that the number of active workers matches the configuration
 				active := int(activeWorkers.Load())
@@ -129,7 +129,7 @@ func TestProperty_WorkerStayActive(t *testing.T) {
 					for range taskCount {
 						err := wp.Submit(Task[int]{
 							Fn: func() (int, error) {
-								time.Sleep(10 * time.Millisecond)
+								time.Sleep(1 * time.Millisecond)
 								return batch, nil
 							},
 						})
@@ -187,7 +187,7 @@ func TestProperty_ContextCancellation(t *testing.T) {
 				for range taskCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(10 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return 1, nil
 						},
 					})
@@ -203,7 +203,7 @@ func TestProperty_ContextCancellation(t *testing.T) {
 				cancel()
 
 				// Try to submit after cancellation - should fail
-				time.Sleep(20 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond)
 				err = wp.Submit(Task[int]{
 					Fn: func() (int, error) {
 						return 1, nil
@@ -254,7 +254,7 @@ func TestProperty_CloseWaitsForCompletion(t *testing.T) {
 				for range taskCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(20 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							completed.Add(1)
 							return 1, nil
 						},
@@ -389,7 +389,7 @@ func TestProperty_TaskQueueing(t *testing.T) {
 				for range taskCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(10 * time.Millisecond)
+							time.Sleep(1 * time.Millisecond)
 							executed.Add(1)
 							return 1, nil
 						},
@@ -642,8 +642,7 @@ func TestProperty_GenerateContextCancellation(t *testing.T) {
 						readCount++
 					case <-time.After(100 * time.Millisecond):
 						cancel()
-						// Timeout is acceptable
-						break
+						// Timeout is acceptable, continue to next iteration
 					}
 				}
 
@@ -809,7 +808,7 @@ func TestProperty_RepeatContextCancellation(t *testing.T) {
 						readCount++
 					case <-time.After(100 * time.Millisecond):
 						// Timeout, cancel and continue
-						break
+						// break
 					}
 				}
 
@@ -1287,7 +1286,7 @@ func TestProperty_FanInContextCancellation(t *testing.T) {
 						readCount++
 					case <-time.After(500 * time.Millisecond):
 						// Timeout, break and cancel
-						break
+						// break
 					}
 				}
 
@@ -1737,7 +1736,7 @@ func TestProperty_BridgeContextCancellation(t *testing.T) {
 						readCount++
 					case <-time.After(500 * time.Millisecond):
 						// Timeout, break and cancel
-						break
+						// break
 					}
 				}
 
@@ -2126,7 +2125,7 @@ func TestProperty_OrDoneContextCancellation(t *testing.T) {
 						readCount++
 					case <-time.After(500 * time.Millisecond):
 						// Timeout, break and cancel
-						break
+						// break
 					}
 				}
 
@@ -2245,7 +2244,7 @@ func TestProperty_OrDoneRaceCondition(t *testing.T) {
 							}
 						case <-time.After(100 * time.Millisecond):
 							// Timeout, continue
-							break
+							// break
 						}
 					}
 					// Now cancel
@@ -2308,7 +2307,7 @@ func TestProperty_BatchSubmitCompleteness(t *testing.T) {
 					value := i
 					tasks[i] = Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(5 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return value, nil
 						},
 					}
@@ -2381,7 +2380,7 @@ func TestProperty_BatchSubmitStatusAccuracy(t *testing.T) {
 					value := i
 					tasks[i] = Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(5 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return value, nil
 						},
 					}
@@ -2444,7 +2443,7 @@ func TestProperty_BatchSubmitContextCancellation(t *testing.T) {
 					value := i
 					tasks[i] = Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(20 * time.Millisecond)
+							time.Sleep(5 * time.Millisecond)
 							return value, nil
 						},
 					}
@@ -2459,7 +2458,7 @@ func TestProperty_BatchSubmitContextCancellation(t *testing.T) {
 
 				// Start goroutine to cancel context after a short delay
 				go func() {
-					time.Sleep(20 * time.Millisecond)
+					time.Sleep(10 * time.Millisecond)
 					cancel()
 				}()
 
@@ -2536,7 +2535,7 @@ func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 				for i := range taskCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(5 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return i, nil
 						},
 					})
@@ -2557,7 +2556,7 @@ func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 				}
 
 				// Wait a bit for tasks to start executing
-				time.Sleep(30 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 
 				// Check final metrics
 				metrics := wp.Metrics()
@@ -2604,7 +2603,7 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 					for range taskCount {
 						<-wp.Results()
 						// Drain results slowly to allow queue to build up
-						time.Sleep(20 * time.Millisecond)
+						time.Sleep(10 * time.Millisecond)
 					}
 					resultsDone <- true
 				}()
@@ -2618,7 +2617,7 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 						defer submitWg.Done()
 						err := wp.Submit(Task[int]{
 							Fn: func() (int, error) {
-								time.Sleep(10 * time.Millisecond)
+								time.Sleep(5 * time.Millisecond)
 								return taskID, nil
 							},
 						})
@@ -2629,7 +2628,7 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 				}
 
 				// Wait a bit for submissions to start and queue to build
-				time.Sleep(30 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 
 				// Check metrics - should have queued tasks
 				metrics := wp.Metrics()
@@ -2690,7 +2689,7 @@ func TestProperty_MetricsCompletedTasksAccuracy(t *testing.T) {
 				for i := range taskCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(10 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return i, nil
 						},
 					})
@@ -2764,7 +2763,7 @@ func TestProperty_MetricsFailedTasksAccuracy(t *testing.T) {
 				for i := range successCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(10 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return i, nil
 						},
 					})
@@ -2778,7 +2777,7 @@ func TestProperty_MetricsFailedTasksAccuracy(t *testing.T) {
 				for range failCount {
 					err := wp.Submit(Task[int]{
 						Fn: func() (int, error) {
-							time.Sleep(10 * time.Millisecond)
+							time.Sleep(2 * time.Millisecond)
 							return 0, assert.AnError
 						},
 					})
@@ -2846,7 +2845,7 @@ func TestProperty_MetricsAvgTaskDurationReasonable(t *testing.T) {
 				}()
 
 				// Define task duration (reduced for faster tests)
-				taskDuration := 10 * time.Millisecond
+				taskDuration := 3 * time.Millisecond
 
 				// Submit tasks with known duration
 				for i := range taskCount {
@@ -2909,7 +2908,7 @@ func TestProperty_GenerateBufferedNonBlocking(t *testing.T) {
 
 	properties.Property("GenerateBuffered sends at least bufferSize values without blocking",
 		prop.ForAll(
-			func(bufferSize int, valueCount int) bool {
+			func(bufferSize, valueCount int) bool {
 				// Ensure valid inputs
 				if bufferSize < 1 {
 					bufferSize = 1
@@ -3002,7 +3001,7 @@ func TestProperty_RepeatBufferedNonBlocking(t *testing.T) {
 
 	properties.Property("RepeatBuffered sends at least bufferSize values without blocking",
 		prop.ForAll(
-			func(bufferSize int, valueCount int) bool {
+			func(bufferSize, valueCount int) bool {
 				// Ensure valid inputs
 				if bufferSize < 1 {
 					bufferSize = 1
@@ -3118,7 +3117,11 @@ func TestProperty_WorkerPoolCreationErrorDetail(t *testing.T) {
 				// Error message should contain the invalid value
 				errMsg := err.Error()
 				if !contains(errMsg, fmt.Sprintf("%d", invalidWorkerCount)) {
-					t.Logf("Error message should contain worker count %d, got: %s", invalidWorkerCount, errMsg)
+					t.Logf(
+						"Error message should contain worker count %d, got: %s",
+						invalidWorkerCount,
+						errMsg,
+					)
 					return false
 				}
 

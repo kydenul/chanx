@@ -53,7 +53,7 @@ type WorkerPool[T any] struct {
 	taskChan    chan Task[T]
 	resultChan  chan Result[T]
 	wg          sync.WaitGroup
-	ctx         context.Context
+	ctx         context.Context //nolint:containedctx
 	cancel      context.CancelFunc
 
 	// Metrics fields
@@ -118,7 +118,7 @@ type WorkerPool[T any] struct {
 //	        fmt.Printf("Result: %d\n", result.Value)
 //	    }
 //	}
-func (c *Chanx[T]) NewWorkerPool(ctx context.Context, workerCount int) (*WorkerPool[T], error) {
+func (*Chanx[T]) NewWorkerPool(ctx context.Context, workerCount int) (*WorkerPool[T], error) {
 	if workerCount <= 0 {
 		return nil, fmt.Errorf("%w: got %d, must be at least 1", ErrInvalidWorkerCount, workerCount)
 	}

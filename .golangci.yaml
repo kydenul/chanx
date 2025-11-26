@@ -117,6 +117,10 @@ linters:
           - dupl
           - goconst
           - golines
+          - cyclop
+          - govet
+          - ineffassign
+          - prealloc
 
 formatters:
   enable:

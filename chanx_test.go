@@ -946,7 +946,7 @@ func TestTee_ContextCancellation(t *testing.T) {
 			select {
 			case <-out1:
 			case <-time.After(500 * time.Millisecond):
-				break
+				// Timeout, continue to next iteration
 			}
 		}
 		done <- true
@@ -957,7 +957,7 @@ func TestTee_ContextCancellation(t *testing.T) {
 			select {
 			case <-out2:
 			case <-time.After(500 * time.Millisecond):
-				break
+				// Timeout, continue to next iteration
 			}
 		}
 		done <- true

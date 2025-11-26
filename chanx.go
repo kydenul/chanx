@@ -45,7 +45,7 @@ func NewChanx[T any]() *Chanx[T] { return &Chanx[T]{} }
 //	for v := range ch {
 //	    fmt.Println(v) // Prints: 1, 2, 3, 4, 5
 //	}
-func (c *Chanx[T]) Generate(ctx context.Context, values ...T) <-chan T {
+func (*Chanx[T]) Generate(ctx context.Context, values ...T) <-chan T {
 	dataStream := make(chan T)
 
 	go func() {
@@ -95,7 +95,7 @@ func (c *Chanx[T]) Generate(ctx context.Context, values ...T) <-chan T {
 //	        break
 //	    }
 //	}
-func (c *Chanx[T]) Repeat(ctx context.Context, values ...T) <-chan T {
+func (*Chanx[T]) Repeat(ctx context.Context, values ...T) <-chan T {
 	dataStream := make(chan T)
 
 	go func() {
@@ -148,7 +148,7 @@ func (c *Chanx[T]) Repeat(ctx context.Context, values ...T) <-chan T {
 //	        break
 //	    }
 //	}
-func (c *Chanx[T]) RepeatFn(ctx context.Context, fn func() T) <-chan T {
+func (*Chanx[T]) RepeatFn(ctx context.Context, fn func() T) <-chan T {
 	dataStream := make(chan T)
 
 	go func() {
@@ -189,7 +189,7 @@ func (c *Chanx[T]) RepeatFn(ctx context.Context, fn func() T) <-chan T {
 //	for v := range limited {
 //	    fmt.Println(v) // Prints: 1, 2, 3, 1, 2 (then stops)
 //	}
-func (c *Chanx[T]) Take(ctx context.Context, valueStream <-chan T, number int) <-chan T {
+func (*Chanx[T]) Take(ctx context.Context, valueStream <-chan T, number int) <-chan T {
 	takeStream := make(chan T)
 
 	go func() {
@@ -221,7 +221,8 @@ func (c *Chanx[T]) Take(ctx context.Context, valueStream <-chan T, number int) <
 //
 // Time Complexity: O(n*m) where n is number of channels and m is average values per channel
 // Space Complexity: O(n) for goroutines, O(1) for the output channel buffer
-// Goroutines: Creates n+1 goroutines (1 per input channel + 1 coordinator) that exit when all inputs close or context is cancelled
+// Goroutines: Creates n+1 goroutines (1 per input channel + 1 coordinator)
+// that exit when all inputs close or context is cancelled
 //
 // Common Pitfalls:
 //   - Order of values is non-deterministic due to concurrent reading
@@ -245,7 +246,7 @@ func (c *Chanx[T]) Take(ctx context.Context, valueStream <-chan T, number int) <
 //	for v := range merged {
 //	    fmt.Println(v) // Prints: 1, 4, 2, 5, 3, 6 (order may vary)
 //	}
-func (c *Chanx[T]) FanIn(ctx context.Context, channels ...<-chan T) <-chan T {
+func (*Chanx[T]) FanIn(ctx context.Context, channels ...<-chan T) <-chan T {
 	out := make(chan T)
 
 	go func() {
@@ -439,7 +440,7 @@ func (c *Chanx[T]) Bridge(ctx context.Context, chanStream <-chan <-chan T) <-cha
 //
 //	<-done // Blocks until sig1 or sig2 closes
 //	fmt.Println("One channel closed")
-func (c *Chanx[T]) Or(channels ...<-chan T) <-chan T {
+func (*Chanx[T]) Or(channels ...<-chan T) <-chan T {
 	// Optimization: handle edge cases
 	switch len(channels) {
 	case 0:
@@ -519,7 +520,7 @@ func (c *Chanx[T]) Or(channels ...<-chan T) <-chan T {
 //	for v := range wrapped {
 //	    fmt.Println(v) // Stops after ~2 seconds due to context timeout
 //	}
-func (c *Chanx[T]) OrDone(ctx context.Context, channel <-chan T) <-chan T {
+func (*Chanx[T]) OrDone(ctx context.Context, channel <-chan T) <-chan T {
 	valStream := make(chan T)
 
 	go func() {
@@ -581,7 +582,11 @@ func (c *Chanx[T]) OrDone(ctx context.Context, channel <-chan T) <-chan T {
 //	for v := range ch {
 //	    fmt.Println(v) // Prints: 1, 2, 3, 4, 5
 //	}
-func (c *Chanx[T]) GenerateBuffered(ctx context.Context, bufferSize int, values ...T) (<-chan T, error) {
+func (*Chanx[T]) GenerateBuffered(
+	ctx context.Context,
+	bufferSize int,
+	values ...T,
+) (<-chan T, error) {
 	if bufferSize < 0 {
 		return nil, fmt.Errorf("%w: got %d, must be at least 0", ErrInvalidBufferSize, bufferSize)
 	}
@@ -647,7 +652,11 @@ func (c *Chanx[T]) GenerateBuffered(ctx context.Context, bufferSize int, values 
 //	        break
 //	    }
 //	}
-func (c *Chanx[T]) RepeatBuffered(ctx context.Context, bufferSize int, values ...T) (<-chan T, error) {
+func (*Chanx[T]) RepeatBuffered(
+	ctx context.Context,
+	bufferSize int,
+	values ...T,
+) (<-chan T, error) {
 	if bufferSize < 0 {
 		return nil, fmt.Errorf("%w: got %d, must be at least 0", ErrInvalidBufferSize, bufferSize)
 	}
