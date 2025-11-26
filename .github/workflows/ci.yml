@@ -44,7 +44,7 @@ jobs:
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24'
+      if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.25'
       uses: codecov/codecov-action@v4
       with:
         files: ./coverage.out
@@ -64,7 +64,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.25'
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v6
@@ -83,7 +83,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.25'
 
     - name: Run benchmarks
       run: go test -bench=. -benchmem -run=^$ ./... | tee benchmark.txt
