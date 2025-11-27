@@ -120,8 +120,6 @@ formatters:
     - goimports # Checks if the code and import statements are formatted according to the 'goimports' command.
     - golines # Checks if code is formatted, and fixes long lines.
   settings:
-    golines:
-      max-line-length: 120
     gofmt:
       simplify: false
       rewrite-rules:
