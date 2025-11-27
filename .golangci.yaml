@@ -1,9 +1,6 @@
 version: "2"
 
 linters:
-  Default: none
-  tests-disable-all: true
-
   # Enable specific linter.
   enable:
     - asciicheck # Checks that all code identifiers does not have non-ASCII symbols in the name. [fast]
@@ -42,8 +39,6 @@ linters:
     funlen:
       lines: 150
       statements: 100
-    golines:
-      max-line-length: 120
     goconst:
       min-len: 5
       min-occurrences: 3
@@ -51,8 +46,6 @@ linters:
       line-length: 120
     cyclop:
       max-complexity: 24
-    iface:
-      min-impl: 2
     errcheck:
       check-type-assertions: true
       check-blank: false
@@ -127,6 +120,8 @@ formatters:
     - goimports # Checks if the code and import statements are formatted according to the 'goimports' command.
     - golines # Checks if code is formatted, and fixes long lines.
   settings:
+    golines:
+      max-line-length: 120
     gofmt:
       simplify: false
       rewrite-rules:
