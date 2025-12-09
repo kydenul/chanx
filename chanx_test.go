@@ -2006,13 +2006,11 @@ func BenchmarkSubmitBatch_vs_Individual(b *testing.B) {
 	for _, taskCount := range taskCounts {
 		// Benchmark individual submission
 		b.Run(fmt.Sprintf("Individual_%d", taskCount), func(b *testing.B) {
-			c := NewChanx[int]()
-
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				ctx, cancel := context.WithCancel(context.Background())
-				wp, _ := c.NewWorkerPool(ctx, 5)
+				wp, _ := NewWorkerPool[int](ctx, 5)
 
 				// Drain results
 				go func() {
@@ -2038,13 +2036,11 @@ func BenchmarkSubmitBatch_vs_Individual(b *testing.B) {
 
 		// Benchmark batch submission
 		b.Run(fmt.Sprintf("Batch_%d", taskCount), func(b *testing.B) {
-			c := NewChanx[int]()
-
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				ctx, cancel := context.WithCancel(context.Background())
-				wp, _ := c.NewWorkerPool(ctx, 5)
+				wp, _ := NewWorkerPool[int](ctx, 5)
 
 				// Drain results
 				go func() {
@@ -2077,13 +2073,11 @@ func BenchmarkSubmitBatch_vs_Individual(b *testing.B) {
 // BenchmarkSubmitBatch_1000Tasks benchmarks batch submission with 1000 tasks
 // Validates: Requirements 3.4
 func BenchmarkSubmitBatch_1000Tasks(b *testing.B) {
-	c := NewChanx[int]()
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		ctx, cancel := context.WithCancel(context.Background())
-		wp, _ := c.NewWorkerPool(ctx, 10)
+		wp, _ := NewWorkerPool[int](ctx, 10)
 
 		// Drain results
 		go func() {
@@ -2313,8 +2307,7 @@ func TestRepeatBuffered_ContextCancellation(t *testing.T) {
 func TestErrorHandling_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 3)
+	wp, err := NewWorkerPool[int](ctx, 3)
 	assert.NoError(t, err, "Failed to create worker pool")
 
 	// Start goroutine to drain results
@@ -2366,8 +2359,7 @@ func TestErrorHandling_ContextCancellation(t *testing.T) {
 func TestErrorHandling_PoolClosed(t *testing.T) {
 	ctx := context.Background()
 
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 3)
+	wp, err := NewWorkerPool[int](ctx, 3)
 	assert.NoError(t, err, "Failed to create worker pool")
 
 	// Start goroutine to drain results
@@ -2408,8 +2400,7 @@ func TestErrorHandling_PoolClosed(t *testing.T) {
 func TestErrorHandling_BatchSubmitContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 2)
+	wp, err := NewWorkerPool[int](ctx, 2)
 	assert.NoError(t, err, "Failed to create worker pool")
 
 	// Start goroutine to drain results

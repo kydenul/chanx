@@ -92,8 +92,7 @@ type WorkerPool[T any] struct {
 // Example:
 //
 //	ctx := context.Background()
-//	c := NewChanx[int]()
-//	pool, err := c.NewWorkerPool(ctx, 5)
+//	pool, err := NewWorkerPool[int](ctx, 5)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -118,7 +117,7 @@ type WorkerPool[T any] struct {
 //	        fmt.Printf("Result: %d\n", result.Value)
 //	    }
 //	}
-func (*Chanx[T]) NewWorkerPool(ctx context.Context, workerCount int) (*WorkerPool[T], error) {
+func NewWorkerPool[T any](ctx context.Context, workerCount int) (*WorkerPool[T], error) {
 	if workerCount <= 0 {
 		return nil, fmt.Errorf("%w: got %d, must be at least 1", ErrInvalidWorkerCount, workerCount)
 	}

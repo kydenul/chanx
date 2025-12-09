@@ -25,9 +25,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// Feature: worker-pool, Property 1: Worker 数量匹配
-// 对于任何 worker 数量配置，创建线程池后实际运行的 worker 数量应该与指定数量相等
-// Validates: Requirements 1.1
 func TestProperty_WorkerCountMatch(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -37,8 +34,7 @@ func TestProperty_WorkerCountMatch(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -88,9 +84,6 @@ func TestProperty_WorkerCountMatch(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 2: Worker 持续活跃
-// 对于任何 线程池实例，在其生命周期内应该始终保持指定数量的 worker 处于活跃状态
-// Validates: Requirements 1.2
 func TestProperty_WorkerStayActive(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -100,8 +93,7 @@ func TestProperty_WorkerStayActive(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -157,9 +149,6 @@ func TestProperty_WorkerStayActive(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 3: Context 取消关闭
-// 对于任何 线程池实例，当 context 被取消时，线程池应该停止接受新任务并优雅关闭
-// Validates: Requirements 1.3
 func TestProperty_ContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -168,8 +157,7 @@ func TestProperty_ContextCancellation(t *testing.T) {
 			func(workerCount int) bool {
 				ctx, cancel := context.WithCancel(context.Background())
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -220,9 +208,6 @@ func TestProperty_ContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 4: 关闭等待完成
-// 对于任何 正在执行的任务集合，关闭线程池时应该等待所有任务完成后再退出
-// Validates: Requirements 1.4
 func TestProperty_CloseWaitsForCompletion(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -231,8 +216,7 @@ func TestProperty_CloseWaitsForCompletion(t *testing.T) {
 			func(workerCount, taskCount int) bool {
 				ctx := context.Background()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -290,9 +274,6 @@ func TestProperty_CloseWaitsForCompletion(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 5: 任务执行保证
-// 对于任何 提交的任务，它应该被某个 worker 执行
-// Validates: Requirements 2.1
 func TestProperty_TaskExecutionGuarantee(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -302,8 +283,7 @@ func TestProperty_TaskExecutionGuarantee(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -352,9 +332,6 @@ func TestProperty_TaskExecutionGuarantee(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 6: 任务排队处理
-// 对于任何 超过 worker 数量的任务集合，所有任务最终都应该被执行
-// Validates: Requirements 2.2
 func TestProperty_TaskQueueing(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -364,8 +341,7 @@ func TestProperty_TaskQueueing(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -420,9 +396,6 @@ func TestProperty_TaskQueueing(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 7: 结果往返一致性
-// 对于任何 提交的任务，应该能从结果 channel 收到对应的执行结果
-// Validates: Requirements 2.3
 func TestProperty_ResultRoundTrip(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -432,8 +405,7 @@ func TestProperty_ResultRoundTrip(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -491,9 +463,6 @@ func TestProperty_ResultRoundTrip(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 8: 错误正确传递
-// 对于任何 返回错误的任务，错误应该通过结果 channel 正确传递给调用者
-// Validates: Requirements 2.4
 func TestProperty_ErrorPropagation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -503,8 +472,7 @@ func TestProperty_ErrorPropagation(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -560,9 +528,6 @@ func TestProperty_ErrorPropagation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 9: Generate 顺序保持
-// 对于任何 值序列，Generate 函数输出的值应该与输入顺序完全一致
-// Validates: Requirements 3.1
 func TestProperty_GenerateOrderPreservation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -607,9 +572,6 @@ func TestProperty_GenerateOrderPreservation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 10: Generate context 取消
-// 对于任何 Generate 调用，当 context 被取消时应该停止发送并关闭 channel
-// Validates: Requirements 3.2
 func TestProperty_GenerateContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -670,9 +632,6 @@ func TestProperty_GenerateContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 11: Generate 完成关闭
-// 对于任何 值列表，Generate 发送完所有值后应该关闭 channel
-// Validates: Requirements 3.3
 func TestProperty_GenerateClosesAfterCompletion(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -712,9 +671,6 @@ func TestProperty_GenerateClosesAfterCompletion(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 12: Repeat 循环模式
-// 对于任何 值序列，Repeat 函数应该循环发送该序列，每个周期的顺序保持一致
-// Validates: Requirements 4.1, 4.3
 func TestProperty_RepeatCyclePattern(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -775,9 +731,6 @@ func TestProperty_RepeatCyclePattern(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 13: Repeat context 取消
-// 对于任何 Repeat 调用，当 context 被取消时应该停止重复并关闭 channel
-// Validates: Requirements 4.2
 func TestProperty_RepeatContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -836,9 +789,6 @@ func TestProperty_RepeatContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 14: RepeatFn 重复执行
-// 对于任何 函数，RepeatFn 应该重复执行该函数并正确发送每次的返回值
-// Validates: Requirements 5.1, 5.3
 func TestProperty_RepeatFnRepeatedExecution(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -890,9 +840,6 @@ func TestProperty_RepeatFnRepeatedExecution(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 15: RepeatFn context 取消
-// 对于任何 RepeatFn 调用，当 context 被取消时应该停止执行并关闭 channel
-// Validates: Requirements 5.2
 func TestProperty_RepeatFnContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -954,9 +901,6 @@ func TestProperty_RepeatFnContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 16: Take 数量精确
-// 对于任何 数量 N 和源 channel，Take 函数应该输出恰好 N 个值（如果源有足够的值）
-// Validates: Requirements 6.1
 func TestProperty_TakeExactCount(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1009,9 +953,6 @@ func TestProperty_TakeExactCount(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 17: Take 完成关闭
-// 对于任何 Take 调用，取出指定数量的值后应该关闭输出 channel
-// Validates: Requirements 6.2
 func TestProperty_TakeClosesAfterCompletion(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1065,9 +1006,6 @@ func TestProperty_TakeClosesAfterCompletion(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 18: Take context 取消
-// 对于任何 Take 调用，当 context 被取消时应该提前关闭 channel
-// Validates: Requirements 6.3
 func TestProperty_TakeContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1124,9 +1062,6 @@ func TestProperty_TakeContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 19: FanIn 值完整性
-// 对于任何 输入 channel 集合，FanIn 输出的值总数应该等于所有输入 channel 值的总和
-// Validates: Requirements 7.1, 7.4
 func TestProperty_FanInValueCompleteness(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1183,9 +1118,6 @@ func TestProperty_FanInValueCompleteness(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 20: FanIn 全部关闭
-// 对于任何 输入 channel 集合，当所有输入都关闭时输出 channel 应该关闭
-// Validates: Requirements 7.2
 func TestProperty_FanInClosesWhenAllInputsClose(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1240,9 +1172,6 @@ func TestProperty_FanInClosesWhenAllInputsClose(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 21: FanIn context 取消
-// 对于任何 FanIn 调用，当 context 被取消时应该停止读取并关闭输出 channel
-// Validates: Requirements 7.3
 func TestProperty_FanInContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1315,9 +1244,6 @@ func TestProperty_FanInContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 22: Tee 输出相等
-// 对于任何 输入值序列，Tee 的两个输出 channel 应该收到完全相同的值序列
-// Validates: Requirements 8.1, 8.4
 func TestProperty_TeeOutputEquality(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1404,9 +1330,6 @@ func TestProperty_TeeOutputEquality(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 23: Tee 输入关闭
-// 对于任何 Tee 调用，当输入 channel 关闭时两个输出 channel 都应该关闭
-// Validates: Requirements 8.2
 func TestProperty_TeeInputClose(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1461,9 +1384,6 @@ func TestProperty_TeeInputClose(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 24: Tee context 取消
-// 对于任何 Tee 调用，当 context 被取消时应该停止转发并关闭两个输出 channel
-// Validates: Requirements 8.3
 func TestProperty_TeeContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1545,9 +1465,6 @@ func TestProperty_TeeContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 3: Bridge 值完整性
-// 对于任何 channel 流，Bridge 函数应该转发所有输入值到输出 channel
-// Validates: Requirements 2.2
 func TestProperty_BridgeValueCompleteness(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1614,9 +1531,6 @@ func TestProperty_BridgeValueCompleteness(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 26: Bridge 流关闭
-// 对于任何 Bridge 调用，当 channel 流关闭且所有内部 channel 完成时输出应该关闭
-// Validates: Requirements 9.2
 func TestProperty_BridgeStreamClose(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1682,9 +1596,6 @@ func TestProperty_BridgeStreamClose(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 27: Bridge context 取消
-// 对于任何 Bridge 调用，当 context 被取消时应该停止处理并关闭输出 channel
-// Validates: Requirements 9.3
 func TestProperty_BridgeContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1765,9 +1676,6 @@ func TestProperty_BridgeContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 28: Or 任一关闭
-// 对于任何 channel 集合，Or 函数应该在任一输入 channel 关闭时关闭输出 channel
-// Validates: Requirements 10.1, 10.4
 func TestProperty_OrAnyClose(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1847,9 +1755,6 @@ func TestProperty_OrAnyClose(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 1: Or 函数 Goroutine 清理
-// 对于任何数量的输入 channel，当 Or 函数返回后，所有相关的 goroutine 应该在合理时间内（1秒）被清理
-// Validates: Requirements 1.2
 func TestProperty_OrGoroutineCleanup(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -1937,9 +1842,6 @@ func TestProperty_OrGoroutineCleanup(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 2: Or 函数快速响应
-// 对于任何输入 channel 集合，当任一 channel 关闭时，Or 函数的输出 channel 应该立即关闭
-// Validates: Requirements 1.3
 func TestProperty_OrFastResponse(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2031,9 +1933,6 @@ func TestProperty_OrFastResponse(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 29: OrDone 值转发
-// 对于任何 输入 channel，OrDone 应该将所有值完整转发到输出 channel
-// Validates: Requirements 11.1
 func TestProperty_OrDoneValueForwarding(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2084,9 +1983,6 @@ func TestProperty_OrDoneValueForwarding(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 30: OrDone context 取消
-// 对于任何 OrDone 调用，当 context 被取消时应该停止转发并关闭输出 channel
-// Validates: Requirements 11.2
 func TestProperty_OrDoneContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2154,9 +2050,6 @@ func TestProperty_OrDoneContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 31: OrDone 输入关闭
-// 对于任何 OrDone 调用，当输入 channel 关闭时应该关闭输出 channel
-// Validates: Requirements 11.3
 func TestProperty_OrDoneInputClose(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2201,9 +2094,6 @@ func TestProperty_OrDoneInputClose(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: worker-pool, Property 32: OrDone 竞态处理
-// 对于任何 OrDone 调用，无论 context 取消和输入关闭哪个先发生，都应该正确关闭输出
-// Validates: Requirements 11.4
 func TestProperty_OrDoneRaceCondition(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2274,9 +2164,6 @@ func TestProperty_OrDoneRaceCondition(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 4: 批量提交完整性
-// 对于任何任务切片，SubmitBatch 应该尝试提交所有任务，并返回准确的提交计数
-// Validates: Requirements 3.1
 func TestProperty_BatchSubmitCompleteness(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2293,8 +2180,7 @@ func TestProperty_BatchSubmitCompleteness(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -2347,9 +2233,6 @@ func TestProperty_BatchSubmitCompleteness(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 5: 批量提交状态准确性
-// 对于任何批量提交操作，返回的 SubmittedCount 加上 Errors 的数量应该等于输入任务的总数
-// Validates: Requirements 3.2
 func TestProperty_BatchSubmitStatusAccuracy(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2366,8 +2249,7 @@ func TestProperty_BatchSubmitStatusAccuracy(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -2410,9 +2292,6 @@ func TestProperty_BatchSubmitStatusAccuracy(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 6: 批量提交 Context 取消
-// 对于任何批量提交操作，当 context 被取消时，应该停止提交剩余任务并返回已提交的数量
-// Validates: Requirements 3.3
 func TestProperty_BatchSubmitContextCancellation(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2428,8 +2307,7 @@ func TestProperty_BatchSubmitContextCancellation(t *testing.T) {
 
 				ctx, cancel := context.WithCancel(context.Background())
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					cancel()
@@ -2497,9 +2375,6 @@ func TestProperty_BatchSubmitContextCancellation(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 7: Metrics 活跃 Worker 准确性
-// 对于任何 WorkerPool 实例，Metrics 返回的 ActiveWorkers 应该不超过配置的 workerCount
-// Validates: Requirements 4.1
 func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2516,8 +2391,7 @@ func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -2572,9 +2446,6 @@ func TestProperty_MetricsActiveWorkersAccuracy(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 8: Metrics 队列长度准确性
-// 对于任何 WorkerPool 实例，当提交的任务数超过 worker 数量时，QueuedTasks 应该大于 0
-// Validates: Requirements 4.2
 func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2588,8 +2459,7 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -2649,9 +2519,6 @@ func TestProperty_MetricsQueuedTasksAccuracy(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 9: Metrics 完成计数准确性
-// 对于任何 WorkerPool 实例，CompletedTasks 应该等于成功执行的任务数量
-// Validates: Requirements 4.3
 func TestProperty_MetricsCompletedTasksAccuracy(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2668,8 +2535,7 @@ func TestProperty_MetricsCompletedTasksAccuracy(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -2716,9 +2582,6 @@ func TestProperty_MetricsCompletedTasksAccuracy(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 10: Metrics 失败计数准确性
-// 对于任何 WorkerPool 实例，FailedTasks 应该等于返回错误的任务数量
-// Validates: Requirements 4.4
 func TestProperty_MetricsFailedTasksAccuracy(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2742,8 +2605,7 @@ func TestProperty_MetricsFailedTasksAccuracy(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -2808,9 +2670,6 @@ func TestProperty_MetricsFailedTasksAccuracy(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 11: Metrics 平均时间合理性
-// 对于任何 WorkerPool 实例，AvgTaskDuration 应该在合理范围内（大于0且小于最长任务时间）
-// Validates: Requirements 4.5
 func TestProperty_MetricsAvgTaskDurationReasonable(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2827,8 +2686,7 @@ func TestProperty_MetricsAvgTaskDurationReasonable(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				assert.NoError(t, err, "Failed to create worker pool")
 				if err != nil {
 					return false
@@ -2900,9 +2758,6 @@ func TestProperty_MetricsAvgTaskDurationReasonable(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 12: GenerateBuffered 缓冲行为
-// 对于任何缓冲大小和值序列，GenerateBuffered 应该能够在不阻塞的情况下发送至少 bufferSize 个值
-// Validates: Requirements 5.1
 func TestProperty_GenerateBufferedNonBlocking(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -2993,9 +2848,6 @@ func TestProperty_GenerateBufferedNonBlocking(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 13: RepeatBuffered 缓冲行为
-// 对于任何缓冲大小和值序列，RepeatBuffered 应该能够在不阻塞的情况下发送至少 bufferSize 个值
-// Validates: Requirements 5.2
 func TestProperty_RepeatBufferedNonBlocking(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -3083,8 +2935,6 @@ func TestProperty_RepeatBufferedNonBlocking(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 16: WorkerPool 创建错误详细性
-// Validates: Requirements 7.1
 func TestProperty_WorkerPoolCreationErrorDetail(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -3093,8 +2943,7 @@ func TestProperty_WorkerPoolCreationErrorDetail(t *testing.T) {
 			func(invalidWorkerCount int) bool {
 				ctx := context.Background()
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, invalidWorkerCount)
+				wp, err := NewWorkerPool[int](ctx, invalidWorkerCount)
 
 				// Should return an error
 				if err == nil {
@@ -3146,8 +2995,6 @@ func contains(s, substr string) bool {
 		}())
 }
 
-// Feature: chanx-optimization, Property 17: 任务提交错误详细性
-// Validates: Requirements 7.2
 func TestProperty_TaskSubmissionErrorDetail(t *testing.T) {
 	properties := gopter.NewProperties(nil)
 
@@ -3156,8 +3003,7 @@ func TestProperty_TaskSubmissionErrorDetail(t *testing.T) {
 			func(workerCount int) bool {
 				ctx, cancel := context.WithCancel(context.Background())
 
-				c := NewChanx[int]()
-				wp, err := c.NewWorkerPool(ctx, workerCount)
+				wp, err := NewWorkerPool[int](ctx, workerCount)
 				if err != nil {
 					t.Logf("Failed to create worker pool: %v", err)
 					return false
@@ -3212,9 +3058,6 @@ func TestProperty_TaskSubmissionErrorDetail(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-// Feature: chanx-optimization, Property 14: Context 取消后 Goroutine 清理
-// 对于任何 Chanx 函数，当 context 被取消后，所有相关 goroutine 应该在 1 秒内退出
-// Validates: Requirements 6.3
 func TestProperty_ContextCancellationGoroutineCleanup(t *testing.T) {
 	// Test each function type individually to avoid timeout
 	testCases := []struct {
@@ -3361,9 +3204,6 @@ func TestProperty_ContextCancellationGoroutineCleanup(t *testing.T) {
 	}
 }
 
-// Feature: chanx-optimization, Property 15: 操作完成后 Goroutine 清理
-// 对于任何 Chanx 函数，当所有 channel 操作完成后，不应该有遗留的 goroutine
-// Validates: Requirements 6.4
 func TestProperty_OperationCompletionGoroutineCleanup(t *testing.T) {
 	// Test each function type to ensure goroutines are cleaned up after completion
 	testCases := []struct {

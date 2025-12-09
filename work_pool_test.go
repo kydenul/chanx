@@ -12,8 +12,7 @@ import (
 
 func TestWorkerPool_BasicTaskSubmission(t *testing.T) {
 	ctx := context.Background()
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 2)
+	wp, err := NewWorkerPool[int](ctx, 2)
 	assert.NoError(t, err)
 	defer wp.Close()
 
@@ -33,8 +32,7 @@ func TestWorkerPool_BasicTaskSubmission(t *testing.T) {
 
 func TestWorkerPool_ZeroTasks(t *testing.T) {
 	ctx := context.Background()
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 2)
+	wp, err := NewWorkerPool[int](ctx, 2)
 	assert.NoError(t, err)
 
 	// Close immediately without submitting tasks
@@ -47,8 +45,7 @@ func TestWorkerPool_ZeroTasks(t *testing.T) {
 
 func TestWorkerPool_SingleTask(t *testing.T) {
 	ctx := context.Background()
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 3)
+	wp, err := NewWorkerPool[int](ctx, 3)
 	assert.NoError(t, err)
 	defer wp.Close()
 
@@ -68,8 +65,7 @@ func TestWorkerPool_SingleTask(t *testing.T) {
 
 func TestWorkerPool_ManyTasks(t *testing.T) {
 	ctx := context.Background()
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 5)
+	wp, err := NewWorkerPool[int](ctx, 5)
 	assert.NoError(t, err)
 	defer wp.Close()
 
@@ -101,8 +97,7 @@ func TestWorkerPool_ManyTasks(t *testing.T) {
 
 func TestWorkerPool_TaskReturnsError(t *testing.T) {
 	ctx := context.Background()
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 2)
+	wp, err := NewWorkerPool[int](ctx, 2)
 	assert.NoError(t, err)
 	defer wp.Close()
 
@@ -122,8 +117,7 @@ func TestWorkerPool_TaskReturnsError(t *testing.T) {
 
 func TestWorkerPool_MixedSuccessAndError(t *testing.T) {
 	ctx := context.Background()
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 3)
+	wp, err := NewWorkerPool[int](ctx, 3)
 	assert.NoError(t, err)
 	defer wp.Close()
 
@@ -168,8 +162,7 @@ func TestWorkerPool_MixedSuccessAndError(t *testing.T) {
 
 func TestWorkerPool_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 2)
+	wp, err := NewWorkerPool[int](ctx, 2)
 	assert.NoError(t, err)
 
 	// Start draining results
@@ -204,8 +197,7 @@ func TestWorkerPool_ContextCancellation(t *testing.T) {
 
 func TestWorkerPool_ContextCancellationDuringExecution(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := NewChanx[int]()
-	wp, err := c.NewWorkerPool(ctx, 2)
+	wp, err := NewWorkerPool[int](ctx, 2)
 	assert.NoError(t, err)
 
 	// Start draining results
@@ -232,15 +224,14 @@ func TestWorkerPool_ContextCancellationDuringExecution(t *testing.T) {
 
 func TestWorkerPool_InvalidWorkerCount(t *testing.T) {
 	ctx := context.Background()
-	c := NewChanx[int]()
 
 	// Test zero workers
-	wp, err := c.NewWorkerPool(ctx, 0)
+	wp, err := NewWorkerPool[int](ctx, 0)
 	assert.Error(t, err)
 	assert.Nil(t, wp)
 
 	// Test negative workers
-	wp, err = c.NewWorkerPool(ctx, -5)
+	wp, err = NewWorkerPool[int](ctx, -5)
 	assert.Error(t, err)
 	assert.Nil(t, wp)
 }
