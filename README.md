@@ -8,8 +8,6 @@
 
 A powerful Go library for channel operations and concurrent programming patterns, inspired by the book "Concurrency in Go". Chanx provides a comprehensive set of utilities for working with Go channels, including common patterns like fan-in, fan-out, pipelines, and a robust worker pool implementation.
 
-[中文文档](README_ZH.md)
-
 ## Features
 
 - **Generic Type Support**: Fully leverages Go 1.18+ generics for type-safe channel operations
@@ -240,10 +238,9 @@ The worker pool provides a robust way to execute tasks concurrently with a fixed
 
 ```go
 ctx := context.Background()
-c := chanx.NewChanx[int]()
 
 // Create a worker pool with 5 workers
-wp, err := c.NewWorkerPool(ctx, 5)
+wp, err := chanx.NewWorkerPool[int](ctx, 5)
 if err != nil {
     log.Fatal(err)
 }
@@ -280,9 +277,8 @@ for i := 0; i < 100; i++ {
 
 ```go
 ctx := context.Background()
-c := chanx.NewChanx[string]()
 
-wp, _ := c.NewWorkerPool(ctx, 3)
+wp, _ := chanx.NewWorkerPool[string](ctx, 3)
 defer wp.Close()
 
 go func() {
@@ -310,9 +306,8 @@ wp.Submit(chanx.Task[string]{
 
 ```go
 ctx, cancel := context.WithCancel(context.Background())
-c := chanx.NewChanx[int]()
 
-wp, _ := c.NewWorkerPool(ctx, 5)
+wp, _ := chanx.NewWorkerPool[int](ctx, 5)
 
 // Submit tasks...
 
@@ -398,9 +393,8 @@ Submit multiple tasks at once for better throughput:
 
 ```go
 ctx := context.Background()
-c := chanx.NewChanx[int]()
 
-wp, _ := c.NewWorkerPool(ctx, 5)
+wp, _ := chanx.NewWorkerPool[int](ctx, 5)
 defer wp.Close()
 
 // Prepare batch of tasks
@@ -475,7 +469,7 @@ ch, _ := c.GenerateBuffered(ctx, 5, values...)
 ```go
 // Use number of CPU cores
 numWorkers := runtime.NumCPU()
-wp, _ := c.NewWorkerPool(ctx, numWorkers)
+wp, _ := chanx.NewWorkerPool[int](ctx, numWorkers)
 ```
 
 **I/O-Bound Tasks**
@@ -483,7 +477,7 @@ wp, _ := c.NewWorkerPool(ctx, numWorkers)
 ```go
 // Use higher worker count (2-10x CPU cores)
 numWorkers := runtime.NumCPU() * 4
-wp, _ := c.NewWorkerPool(ctx, numWorkers)
+wp, _ := chanx.NewWorkerPool[int](ctx, numWorkers)
 ```
 
 **Mixed Workloads**
@@ -491,7 +485,7 @@ wp, _ := c.NewWorkerPool(ctx, numWorkers)
 ```go
 // Start with 2x CPU cores and adjust based on metrics
 numWorkers := runtime.NumCPU() * 2
-wp, _ := c.NewWorkerPool(ctx, numWorkers)
+wp, _ := chanx.NewWorkerPool[int](ctx, numWorkers)
 
 // Monitor and adjust
 metrics := wp.Metrics()
@@ -521,7 +515,7 @@ result := wp.SubmitBatch(tasks)
 
 ### Or Function Optimization
 
-The `Or` function now uses an iterative implementation instead of recursive:
+The `Or` function now uses an iterative implementation with `reflect.Select` instead of recursive:
 
 - **No stack overflow** with large numbers of channels
 - **50%+ faster** for 100+ channels
@@ -561,9 +555,10 @@ Every operation should have a context with timeout or cancellation:
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
 
+c := chanx.NewChanx[int]()
 ch := c.Generate(ctx, values...)
 
-// Bad: No timeout
+// Bad: No timeout (may cause goroutine leaks if not fully consumed)
 ctx := context.Background()
 ch := c.Generate(ctx, values...)
 ```
@@ -598,7 +593,7 @@ cancel() // Goroutine exits
 Always close worker pools to ensure clean shutdown:
 
 ```go
-wp, err := c.NewWorkerPool(ctx, 5)
+wp, err := chanx.NewWorkerPool[int](ctx, 5)
 if err != nil {
     return err
 }
@@ -613,12 +608,13 @@ Check errors from all operations:
 
 ```go
 // Check worker pool creation
-wp, err := c.NewWorkerPool(ctx, 0)
+wp, err := chanx.NewWorkerPool[int](ctx, 0)
 if err != nil {
     // Handle error: ErrInvalidWorkerCount
 }
 
 // Check buffered channel creation
+c := chanx.NewChanx[int]()
 ch, err := c.GenerateBuffered(ctx, -1, values...)
 if err != nil {
     // Handle error: ErrInvalidBufferSize
@@ -656,7 +652,7 @@ func TestMain(m *testing.M) {
 Use `Metrics()` to monitor worker pool health:
 
 ```go
-wp, _ := c.NewWorkerPool(ctx, 10)
+wp, _ := chanx.NewWorkerPool[int](ctx, 10)
 
 // Periodic monitoring
 ticker := time.NewTicker(5 * time.Second)
