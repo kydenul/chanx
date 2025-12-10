@@ -8,6 +8,8 @@
 
 A powerful Go library for channel operations and concurrent programming patterns, inspired by the book "Concurrency in Go". Chanx provides a comprehensive set of utilities for working with Go channels, including common patterns like fan-in, fan-out, pipelines, and a robust worker pool implementation.
 
+[中文文档](README_ZH.md)
+
 ## Features
 
 - **Generic Type Support**: Fully leverages Go 1.18+ generics for type-safe channel operations
@@ -422,9 +424,8 @@ Monitor your worker pool in real-time:
 
 ```go
 ctx := context.Background()
-c := chanx.NewChanx[int]()
 
-wp, _ := c.NewWorkerPool(ctx, 10)
+wp, _ := chanx.NewWorkerPool[int](ctx, 10)
 defer wp.Close()
 
 // Submit some tasks...
@@ -515,7 +516,7 @@ result := wp.SubmitBatch(tasks)
 
 ### Or Function Optimization
 
-The `Or` function now uses an iterative implementation with `reflect.Select` instead of recursive:
+The `Or` function now uses an iterative implementation instead of recursive:
 
 - **No stack overflow** with large numbers of channels
 - **50%+ faster** for 100+ channels
@@ -555,10 +556,9 @@ Every operation should have a context with timeout or cancellation:
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
 
-c := chanx.NewChanx[int]()
 ch := c.Generate(ctx, values...)
 
-// Bad: No timeout (may cause goroutine leaks if not fully consumed)
+// Bad: No timeout
 ctx := context.Background()
 ch := c.Generate(ctx, values...)
 ```
