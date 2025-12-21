@@ -15,9 +15,10 @@ A powerful Go library for channel operations and concurrent programming patterns
 - **Generic Type Support**: Fully leverages Go 1.18+ generics for type-safe channel operations
 - **Rich Channel Patterns**: Implements common concurrency patterns from "Concurrency in Go"
 - **Worker Pool**: Production-ready worker pool with graceful shutdown and error handling
+- **Distributed Lock**: Redis-based distributed lock with auto-renewal and deadlock prevention
 - **Context-Aware**: All operations respect context cancellation for clean resource management
 - **Well-Tested**: Comprehensive unit tests and property-based tests using gopter
-- **Zero Dependencies**: Only requires standard library (test dependencies: testify, gopter)
+- **Minimal Dependencies**: Only requires standard library and Redis client (test dependencies: testify, gopter)
 
 ## Installation
 
@@ -319,6 +320,142 @@ cancel()
 // Close waits for all in-flight tasks to complete
 wp.Close()
 ```
+
+## Distributed Lock
+
+Redis-based distributed lock with automatic renewal, providing mutual exclusion across multiple processes.
+
+### Features
+
+- **Mutual Exclusion**: Only one process can hold the lock at a time
+- **Deadlock-Free**: Lock automatically expires via TTL if holder crashes
+- **Auto-Renewal**: Background goroutine keeps lock alive during long operations
+- **Identity Verification**: Only the lock holder can release or renew the lock
+- **Atomic Operations**: Uses Lua scripts for safe lock release and renewal
+
+### Basic Usage
+
+```go
+import (
+    "context"
+    "github.com/kydenul/chanx"
+    "github.com/redis/go-redis/v9"
+)
+
+client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+
+// Create a distributed lock
+lock := chanx.NewDistributedLock(
+    "resource:123:lock",
+    client,
+    chanx.WithTTL(30*time.Second),
+    chanx.WithRenewInterval(10*time.Second),
+)
+
+// Acquire the lock
+acquired, err := lock.Acquire(ctx)
+if err != nil {
+    return err
+}
+if !acquired {
+    return fmt.Errorf("resource is busy")
+}
+defer lock.Release()
+
+// Critical section - only one process executes this
+doExpensiveOperation()
+```
+
+### Using LockGuard
+
+LockGuard provides automatic lock management with guaranteed cleanup:
+
+```go
+lock := chanx.NewDistributedLock("order:123:lock", client)
+
+err := chanx.LockGuard(ctx, lock, func() error {
+    // This code runs with the lock held
+    return processOrder(orderID)
+})
+
+if errors.Is(err, chanx.ErrLockNotAcquired) {
+    // Another process is handling this order
+    return nil
+}
+```
+
+### TryAcquire with Timeout
+
+Wait for a lock to become available with retry:
+
+```go
+lock := chanx.NewDistributedLock("resource:lock", client)
+
+// Try to acquire with 10s timeout, retrying every 100ms
+acquired, err := lock.TryAcquire(ctx, 10*time.Second, 100*time.Millisecond)
+if err != nil {
+    return err
+}
+if acquired {
+    defer lock.Release()
+    // Do work
+}
+```
+
+### LockGuardWithRetry
+
+Combines LockGuard with retry logic:
+
+```go
+err := chanx.LockGuardWithRetry(
+    ctx, lock,
+    10*time.Second,      // timeout
+    100*time.Millisecond, // retry interval
+    func() error {
+        return processOrder(orderID)
+    },
+)
+```
+
+### Configuration Options
+
+```go
+lock := chanx.NewDistributedLock(
+    "my-lock",
+    client,
+    chanx.WithTTL(60*time.Second),           // Lock expiration time
+    chanx.WithRenewInterval(20*time.Second), // Auto-renewal interval
+    chanx.WithValue("worker-1"),             // Custom lock identifier
+    chanx.WithLogger(slog.Default()),        // Custom logger
+)
+```
+
+### Error Types
+
+```go
+var (
+    ErrLockNotAcquired      // Lock is held by another process
+    ErrLockAcquireFailed    // Lock acquisition failed due to error
+    ErrLockReleaseFailed    // Lock release failed due to error
+    ErrLockNotHeld          // Lock not held by this instance
+    ErrLockRenewFailed      // Lock renewal failed
+    ErrNilRedisClient       // Redis client is nil
+    ErrEmptyLockKey         // Lock key is empty
+    ErrInvalidTTL           // TTL value is invalid
+    ErrLockAlreadyHeld      // Lock already held by this instance (prevents goroutine leak)
+    ErrInvalidRenewInterval // Renew interval must be less than TTL
+)
+```
+
+### Best Practices
+
+1. **Always use defer for release**: Ensures lock is released even if function panics
+2. **Set appropriate TTL**: At least 3x the expected operation duration
+3. **Use LockGuard for simple cases**: Automatic cleanup and panic safety
+4. **Monitor renewal failures**: Log errors in production
+5. **Handle ErrLockNotAcquired**: Implement retry or fallback logic
+6. **Don't call Acquire twice**: Calling Acquire() on an already-held lock returns ErrLockAlreadyHeld to prevent goroutine leaks
+7. **RenewInterval auto-correction**: If renewInterval >= TTL, it's automatically corrected to TTL/3
 
 ## Advanced Patterns
 

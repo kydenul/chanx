@@ -15,9 +15,10 @@
 - **泛型支持**：充分利用 Go 1.18+ 泛型实现类型安全的 channel 操作
 - **丰富的 Channel 模式**：实现了《Concurrency in Go》中的常见并发模式
 - **Worker Pool**：生产级别的 worker pool，支持优雅关闭和错误处理
+- **分布式锁**：基于 Redis 的分布式锁，支持自动续期和死锁预防
 - **Context 感知**：所有操作都支持 context 取消，实现清晰的资源管理
 - **完善的测试**：包含全面的单元测试和基于属性的测试（使用 gopter）
-- **零依赖**：仅需要标准库（测试依赖：testify、gopter）
+- **最小依赖**：仅需要标准库和 Redis 客户端（测试依赖：testify、gopter）
 
 ## 安装
 
@@ -319,6 +320,142 @@ cancel()
 // Close 会等待所有正在执行的任务完成
 wp.Close()
 ```
+
+## 分布式锁
+
+基于 Redis 的分布式锁，支持自动续期，提供跨多进程的互斥访问。
+
+### 特性
+
+- **互斥性**：同一时间只有一个进程可以持有锁
+- **无死锁**：如果持有者崩溃，锁会通过 TTL 自动过期
+- **自动续期**：后台 goroutine 在长时间操作期间保持锁的活跃
+- **身份验证**：只有锁的持有者才能释放或续期锁
+- **原子操作**：使用 Lua 脚本确保锁释放和续期的安全性
+
+### 基本用法
+
+```go
+import (
+    "context"
+    "github.com/kydenul/chanx"
+    "github.com/redis/go-redis/v9"
+)
+
+client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+
+// 创建分布式锁
+lock := chanx.NewDistributedLock(
+    "resource:123:lock",
+    client,
+    chanx.WithTTL(30*time.Second),
+    chanx.WithRenewInterval(10*time.Second),
+)
+
+// 获取锁
+acquired, err := lock.Acquire(ctx)
+if err != nil {
+    return err
+}
+if !acquired {
+    return fmt.Errorf("资源正忙")
+}
+defer lock.Release()
+
+// 临界区 - 只有一个进程执行此代码
+doExpensiveOperation()
+```
+
+### 使用 LockGuard
+
+LockGuard 提供自动锁管理，确保清理：
+
+```go
+lock := chanx.NewDistributedLock("order:123:lock", client)
+
+err := chanx.LockGuard(ctx, lock, func() error {
+    // 此代码在持有锁的情况下运行
+    return processOrder(orderID)
+})
+
+if errors.Is(err, chanx.ErrLockNotAcquired) {
+    // 另一个进程正在处理此订单
+    return nil
+}
+```
+
+### 带超时的 TryAcquire
+
+等待锁可用并重试：
+
+```go
+lock := chanx.NewDistributedLock("resource:lock", client)
+
+// 尝试获取锁，超时 10 秒，每 100ms 重试一次
+acquired, err := lock.TryAcquire(ctx, 10*time.Second, 100*time.Millisecond)
+if err != nil {
+    return err
+}
+if acquired {
+    defer lock.Release()
+    // 执行工作
+}
+```
+
+### LockGuardWithRetry
+
+结合 LockGuard 和重试逻辑：
+
+```go
+err := chanx.LockGuardWithRetry(
+    ctx, lock,
+    10*time.Second,       // 超时时间
+    100*time.Millisecond, // 重试间隔
+    func() error {
+        return processOrder(orderID)
+    },
+)
+```
+
+### 配置选项
+
+```go
+lock := chanx.NewDistributedLock(
+    "my-lock",
+    client,
+    chanx.WithTTL(60*time.Second),           // 锁过期时间
+    chanx.WithRenewInterval(20*time.Second), // 自动续期间隔
+    chanx.WithValue("worker-1"),             // 自定义锁标识符
+    chanx.WithLogger(slog.Default()),        // 自定义日志记录器
+)
+```
+
+### 错误类型
+
+```go
+var (
+    ErrLockNotAcquired      // 锁被另一个进程持有
+    ErrLockAcquireFailed    // 获取锁失败
+    ErrLockReleaseFailed    // 释放锁失败
+    ErrLockNotHeld          // 此实例未持有锁
+    ErrLockRenewFailed      // 续期锁失败
+    ErrNilRedisClient       // Redis 客户端为空
+    ErrEmptyLockKey         // 锁键为空
+    ErrInvalidTTL           // TTL 值无效
+    ErrLockAlreadyHeld      // 此实例已持有锁（防止 goroutine 泄漏）
+    ErrInvalidRenewInterval // 续期间隔必须小于 TTL
+)
+```
+
+### 最佳实践
+
+1. **始终使用 defer 释放锁**：确保即使函数 panic 也能释放锁
+2. **设置适当的 TTL**：至少为预期操作时长的 3 倍
+3. **简单场景使用 LockGuard**：自动清理和 panic 安全
+4. **监控续期失败**：在生产环境中记录错误日志
+5. **处理 ErrLockNotAcquired**：实现重试或降级逻辑
+6. **不要重复调用 Acquire**：对已持有的锁调用 Acquire() 会返回 ErrLockAlreadyHeld，防止 goroutine 泄漏
+7. **RenewInterval 自动校正**：如果 renewInterval >= TTL，会自动校正为 TTL/3
 
 ## 高级模式
 

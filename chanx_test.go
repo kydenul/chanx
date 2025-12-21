@@ -1736,8 +1736,7 @@ func TestOrDone_DifferentTypes(t *testing.T) {
 func BenchmarkOr_10Channels(b *testing.B) {
 	c := NewChanx[struct{}]()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		// Create 10 channels
 		channels := make([]<-chan struct{}, 10)
@@ -1774,8 +1773,7 @@ func BenchmarkOr_10Channels(b *testing.B) {
 func BenchmarkOr_50Channels(b *testing.B) {
 	c := NewChanx[struct{}]()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		// Create 50 channels
 		channels := make([]<-chan struct{}, 50)
@@ -1812,8 +1810,7 @@ func BenchmarkOr_50Channels(b *testing.B) {
 func BenchmarkOr_100Channels(b *testing.B) {
 	c := NewChanx[struct{}]()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		// Create 100 channels
 		channels := make([]<-chan struct{}, 100)
@@ -1850,8 +1847,7 @@ func BenchmarkOr_100Channels(b *testing.B) {
 func BenchmarkOr_500Channels(b *testing.B) {
 	c := NewChanx[struct{}]()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		// Create 500 channels
 		channels := make([]<-chan struct{}, 500)
@@ -1889,8 +1885,7 @@ func BenchmarkOr_500Channels(b *testing.B) {
 func BenchmarkBridge_LowConcurrency(b *testing.B) {
 	c := NewChanx[int]()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -1903,7 +1898,7 @@ func BenchmarkBridge_LowConcurrency(b *testing.B) {
 		// Send channels
 		go func() {
 			defer close(chanStream)
-			for j := 0; j < 5; j++ {
+			for j := range 5 {
 				values := make([]int, 10)
 				for k := range values {
 					values[k] = j*10 + k
@@ -1927,8 +1922,7 @@ func BenchmarkBridge_LowConcurrency(b *testing.B) {
 func BenchmarkBridge_MediumConcurrency(b *testing.B) {
 	c := NewChanx[int]()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -1941,7 +1935,7 @@ func BenchmarkBridge_MediumConcurrency(b *testing.B) {
 		// Send channels
 		go func() {
 			defer close(chanStream)
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				values := make([]int, 20)
 				for k := range values {
 					values[k] = j*100 + k
@@ -1965,8 +1959,7 @@ func BenchmarkBridge_MediumConcurrency(b *testing.B) {
 func BenchmarkBridge_HighConcurrency(b *testing.B) {
 	c := NewChanx[int]()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		ctx, cancel := context.WithCancel(context.Background())
 
@@ -1979,7 +1972,7 @@ func BenchmarkBridge_HighConcurrency(b *testing.B) {
 		// Send channels
 		go func() {
 			defer close(chanStream)
-			for j := 0; j < 20; j++ {
+			for j := range 20 {
 				values := make([]int, 50)
 				for k := range values {
 					values[k] = j*1000 + k
@@ -2007,7 +2000,7 @@ func BenchmarkSubmitBatch_vs_Individual(b *testing.B) {
 		// Benchmark individual submission
 		b.Run(fmt.Sprintf("Individual_%d", taskCount), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				b.StopTimer()
 				ctx, cancel := context.WithCancel(context.Background())
 				wp, _ := NewWorkerPool[int](ctx, 5)
@@ -2020,7 +2013,7 @@ func BenchmarkSubmitBatch_vs_Individual(b *testing.B) {
 
 				b.StartTimer()
 				// Submit tasks individually
-				for j := 0; j < taskCount; j++ {
+				for range taskCount {
 					_ = wp.Submit(Task[int]{
 						Fn: func() (int, error) {
 							return 1, nil
@@ -2037,7 +2030,7 @@ func BenchmarkSubmitBatch_vs_Individual(b *testing.B) {
 		// Benchmark batch submission
 		b.Run(fmt.Sprintf("Batch_%d", taskCount), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				b.StopTimer()
 				ctx, cancel := context.WithCancel(context.Background())
 				wp, _ := NewWorkerPool[int](ctx, 5)
