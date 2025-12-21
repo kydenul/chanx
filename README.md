@@ -6,19 +6,17 @@
 [![codecov](https://codecov.io/gh/kydenul/chanx/branch/main/graph/badge.svg)](https://codecov.io/gh/kydenul/chanx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A powerful Go library for channel operations and concurrent programming patterns, inspired by the book "Concurrency in Go". Chanx provides a comprehensive set of utilities for working with Go channels, including common patterns like fan-in, fan-out, pipelines, and a robust worker pool implementation.
+A Go library for channel operations and concurrent programming patterns, inspired by "Concurrency in Go". Provides generic channel utilities, production-ready worker pool, and Redis-based distributed locks.
 
-[中文文档](README_ZH.md)
+[中文文档](README_CN.md)
 
 ## Features
 
-- **Generic Type Support**: Fully leverages Go 1.18+ generics for type-safe channel operations
-- **Rich Channel Patterns**: Implements common concurrency patterns from "Concurrency in Go"
-- **Worker Pool**: Production-ready worker pool with graceful shutdown and error handling
-- **Distributed Lock**: Redis-based distributed lock with auto-renewal and deadlock prevention
-- **Context-Aware**: All operations respect context cancellation for clean resource management
-- **Well-Tested**: Comprehensive unit tests and property-based tests using gopter
-- **Minimal Dependencies**: Only requires standard library and Redis client (test dependencies: testify, gopter)
+- **Channel Patterns**: Generate, Repeat, Take, FanIn, Tee, Bridge, Or, OrDone
+- **Worker Pool**: Production-ready pool with metrics and graceful shutdown
+- **Distributed Lock**: Redis-based lock with auto-renewal
+- **Generic & Type-Safe**: Full Go 1.18+ generics support
+- **Context-Aware**: All operations respect context cancellation
 
 ## Installation
 
@@ -28,234 +26,38 @@ go get github.com/kydenul/chanx
 
 ## Quick Start
 
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/kydenul/chanx"
-)
-
-func main() {
-    ctx := context.Background()
-    c := chanx.NewChanx[int]()
-    
-    // Generate values
-    values := c.Generate(ctx, 1, 2, 3, 4, 5)
-    
-    // Process values
-    for v := range values {
-        fmt.Println(v)
-    }
-}
-```
-
-## Core Functions
-
-### Channel Generators
-
-#### Generate
-
-Creates a channel and sends a sequence of values.
-
-```go
-ctx := context.Background()
-c := chanx.NewChanx[int]()
-ch := c.Generate(ctx, 1, 2, 3, 4, 5)
-
-for v := range ch {
-    fmt.Println(v) // Prints: 1, 2, 3, 4, 5
-}
-```
-
-#### Repeat
-
-Continuously repeats a sequence of values until context is cancelled.
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-
-c := chanx.NewChanx[string]()
-ch := c.Repeat(ctx, "hello", "world")
-
-// Reads: hello, world, hello, world, hello, world, ...
-```
-
-#### RepeatFn
-
-Repeatedly executes a function and sends its return values.
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-
-c := chanx.NewChanx[int]()
-counter := 0
-ch := c.RepeatFn(ctx, func() int {
-    counter++
-    return counter
-})
-
-// Reads: 1, 2, 3, 4, 5, ...
-```
-
-### Channel Transformers
-
-#### Take
-
-Takes the first N values from a channel.
+### Channel Operations
 
 ```go
 ctx := context.Background()
 c := chanx.NewChanx[int]()
 
-source := c.Generate(ctx, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-first5 := c.Take(ctx, source, 5)
+// Generate: send sequence of values
+values := c.Generate(ctx, 1, 2, 3, 4, 5)
 
-for v := range first5 {
-    fmt.Println(v) // Prints: 1, 2, 3, 4, 5
-}
-```
+// Take: limit number of values
+first3 := c.Take(ctx, values, 3)
 
-#### FanIn
-
-Merges multiple channels into a single channel.
-
-```go
-ctx := context.Background()
-c := chanx.NewChanx[int]()
-
+// FanIn: merge multiple channels
 ch1 := c.Generate(ctx, 1, 2, 3)
 ch2 := c.Generate(ctx, 4, 5, 6)
-ch3 := c.Generate(ctx, 7, 8, 9)
-
-merged := c.FanIn(ctx, ch1, ch2, ch3)
-
-// Receives all values from all channels (order may vary)
-for v := range merged {
-    fmt.Println(v)
-}
+merged := c.FanIn(ctx, ch1, ch2)
 ```
 
-#### Tee
-
-Splits one channel into two identical output channels.
+### Worker Pool
 
 ```go
 ctx := context.Background()
-c := chanx.NewChanx[int]()
-
-source := c.Generate(ctx, 1, 2, 3, 4, 5)
-out1, out2 := c.Tee(ctx, source)
-
-// Both out1 and out2 receive the same values
-go func() {
-    for v := range out1 {
-        fmt.Println("Output 1:", v)
-    }
-}()
-
-for v := range out2 {
-    fmt.Println("Output 2:", v)
-}
-```
-
-#### Bridge
-
-Connects a stream of channels into a single output channel.
-
-```go
-ctx := context.Background()
-c := chanx.NewChanx[int]()
-
-chanStream := make(chan (<-chan int))
-
-go func() {
-    defer close(chanStream)
-    chanStream <- c.Generate(ctx, 1, 2, 3)
-    chanStream <- c.Generate(ctx, 4, 5, 6)
-    chanStream <- c.Generate(ctx, 7, 8, 9)
-}()
-
-bridged := c.Bridge(ctx, chanStream)
-
-for v := range bridged {
-    fmt.Println(v) // Prints all values: 1-9
-}
-```
-
-### Control Flow
-
-#### Or
-
-Returns a channel that closes when any of the input channels close.
-
-```go
-c := chanx.NewChanx[struct{}]()
-
-ctx1, cancel1 := context.WithCancel(context.Background())
-ctx2, cancel2 := context.WithCancel(context.Background())
-defer cancel2()
-
-ch1 := c.RepeatFn(ctx1, func() struct{} { return struct{}{} })
-ch2 := c.RepeatFn(ctx2, func() struct{} { return struct{}{} })
-
-orChan := c.Or(ch1, ch2)
-
-// Close one channel
-cancel1()
-
-// orChan will close when ch1 closes
-<-orChan
-```
-
-#### OrDone
-
-Wraps a channel to respect context cancellation.
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-
-c := chanx.NewChanx[int]()
-source := c.Repeat(ctx, 1, 2, 3)
-
-output := c.OrDone(ctx, source)
-
-// Read some values
-for i := 0; i < 10; i++ {
-    fmt.Println(<-output)
-}
-
-// Cancel context to stop
-cancel()
-```
-
-## Worker Pool
-
-The worker pool provides a robust way to execute tasks concurrently with a fixed number of workers.
-
-### Basic Usage
-
-```go
-ctx := context.Background()
-
-// Create a worker pool with 5 workers
-wp, err := chanx.NewWorkerPool[int](ctx, 5)
-if err != nil {
-    log.Fatal(err)
-}
+wp, _ := chanx.NewWorkerPool[int](ctx, 5)
 defer wp.Close()
 
-// Start a goroutine to collect results
+// Collect results
 go func() {
     for result := range wp.Results() {
         if result.Err != nil {
-            fmt.Printf("Task failed: %v\n", result.Err)
+            fmt.Printf("Error: %v\n", result.Err)
         } else {
-            fmt.Printf("Task result: %d\n", result.Value)
+            fmt.Printf("Result: %d\n", result.Value)
         }
     }
 }()
@@ -263,635 +65,123 @@ go func() {
 // Submit tasks
 for i := 0; i < 100; i++ {
     taskID := i
-    err := wp.Submit(chanx.Task[int]{
+    wp.Submit(chanx.Task[int]{
         Fn: func() (int, error) {
-            // Simulate work
-            time.Sleep(100 * time.Millisecond)
             return taskID * 2, nil
         },
     })
-    if err != nil {
-        log.Printf("Failed to submit task: %v", err)
-    }
 }
+
+// Get metrics
+metrics := wp.Metrics()
+fmt.Printf("Completed: %d, Active: %d\n",
+    metrics.CompletedTasks, metrics.ActiveWorkers)
 ```
 
-### Error Handling
-
-```go
-ctx := context.Background()
-
-wp, _ := chanx.NewWorkerPool[string](ctx, 3)
-defer wp.Close()
-
-go func() {
-    for result := range wp.Results() {
-        if result.Err != nil {
-            fmt.Printf("Error: %v\n", result.Err)
-        } else {
-            fmt.Printf("Success: %s\n", result.Value)
-        }
-    }
-}()
-
-// Submit a task that may fail
-wp.Submit(chanx.Task[string]{
-    Fn: func() (string, error) {
-        if rand.Float32() < 0.5 {
-            return "", errors.New("random failure")
-        }
-        return "success", nil
-    },
-})
-```
-
-### Graceful Shutdown
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-
-wp, _ := chanx.NewWorkerPool[int](ctx, 5)
-
-// Submit tasks...
-
-// Cancel context to stop accepting new tasks
-cancel()
-
-// Close waits for all in-flight tasks to complete
-wp.Close()
-```
-
-## Distributed Lock
-
-Redis-based distributed lock with automatic renewal, providing mutual exclusion across multiple processes.
-
-### Features
-
-- **Mutual Exclusion**: Only one process can hold the lock at a time
-- **Deadlock-Free**: Lock automatically expires via TTL if holder crashes
-- **Auto-Renewal**: Background goroutine keeps lock alive during long operations
-- **Identity Verification**: Only the lock holder can release or renew the lock
-- **Atomic Operations**: Uses Lua scripts for safe lock release and renewal
-
-### Basic Usage
+### Distributed Lock
 
 ```go
 import (
-    "context"
     "github.com/kydenul/chanx"
     "github.com/redis/go-redis/v9"
 )
 
 client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-
-// Create a distributed lock
 lock := chanx.NewDistributedLock(
-    "resource:123:lock",
+    "resource:lock",
     client,
     chanx.WithTTL(30*time.Second),
-    chanx.WithRenewInterval(10*time.Second),
 )
 
-// Acquire the lock
-acquired, err := lock.Acquire(ctx)
-if err != nil {
-    return err
-}
-if !acquired {
-    return fmt.Errorf("resource is busy")
-}
-defer lock.Release()
-
-// Critical section - only one process executes this
-doExpensiveOperation()
-```
-
-### Using LockGuard
-
-LockGuard provides automatic lock management with guaranteed cleanup:
-
-```go
-lock := chanx.NewDistributedLock("order:123:lock", client)
-
+// Simple usage with LockGuard
 err := chanx.LockGuard(ctx, lock, func() error {
-    // This code runs with the lock held
-    return processOrder(orderID)
+    // Critical section
+    return processResource()
 })
 
-if errors.Is(err, chanx.ErrLockNotAcquired) {
-    // Another process is handling this order
-    return nil
-}
-```
-
-### TryAcquire with Timeout
-
-Wait for a lock to become available with retry:
-
-```go
-lock := chanx.NewDistributedLock("resource:lock", client)
-
-// Try to acquire with 10s timeout, retrying every 100ms
-acquired, err := lock.TryAcquire(ctx, 10*time.Second, 100*time.Millisecond)
-if err != nil {
-    return err
-}
+// Or manual control
+acquired, err := lock.Acquire(ctx)
 if acquired {
     defer lock.Release()
     // Do work
 }
+
+// Try with retry
+acquired, err = lock.TryAcquire(ctx, 10*time.Second, 100*time.Millisecond)
 ```
 
-### LockGuardWithRetry
+## API Reference
 
-Combines LockGuard with retry logic:
+### Channel Patterns
 
-```go
-err := chanx.LockGuardWithRetry(
-    ctx, lock,
-    10*time.Second,      // timeout
-    100*time.Millisecond, // retry interval
-    func() error {
-        return processOrder(orderID)
-    },
-)
-```
+| Function | Description |
+|----------|-------------|
+| `Generate(ctx, values...)` | Send values sequentially |
+| `Repeat(ctx, values...)` | Repeat values infinitely |
+| `RepeatFn(ctx, fn)` | Repeat function calls |
+| `Take(ctx, ch, n)` | Take first n values |
+| `FanIn(ctx, channels...)` | Merge multiple channels |
+| `Tee(ctx, ch)` | Split channel into two |
+| `Bridge(ctx, chanStream)` | Connect channel stream |
+| `Or(channels...)` | Close when any closes |
+| `OrDone(ctx, ch)` | Respect context cancellation |
 
-### Configuration Options
-
-```go
-lock := chanx.NewDistributedLock(
-    "my-lock",
-    client,
-    chanx.WithTTL(60*time.Second),           // Lock expiration time
-    chanx.WithRenewInterval(20*time.Second), // Auto-renewal interval
-    chanx.WithValue("worker-1"),             // Custom lock identifier
-    chanx.WithLogger(slog.Default()),        // Custom logger
-)
-```
-
-### Error Types
+### Worker Pool
 
 ```go
-var (
-    ErrLockNotAcquired      // Lock is held by another process
-    ErrLockAcquireFailed    // Lock acquisition failed due to error
-    ErrLockReleaseFailed    // Lock release failed due to error
-    ErrLockNotHeld          // Lock not held by this instance
-    ErrLockRenewFailed      // Lock renewal failed
-    ErrNilRedisClient       // Redis client is nil
-    ErrEmptyLockKey         // Lock key is empty
-    ErrInvalidTTL           // TTL value is invalid
-    ErrLockAlreadyHeld      // Lock already held by this instance (prevents goroutine leak)
-    ErrInvalidRenewInterval // Renew interval must be less than TTL
-)
-```
-
-### Best Practices
-
-1. **Always use defer for release**: Ensures lock is released even if function panics
-2. **Set appropriate TTL**: At least 3x the expected operation duration
-3. **Use LockGuard for simple cases**: Automatic cleanup and panic safety
-4. **Monitor renewal failures**: Log errors in production
-5. **Handle ErrLockNotAcquired**: Implement retry or fallback logic
-6. **Don't call Acquire twice**: Calling Acquire() on an already-held lock returns ErrLockAlreadyHeld to prevent goroutine leaks
-7. **RenewInterval auto-correction**: If renewInterval >= TTL, it's automatically corrected to TTL/3
-
-## Advanced Patterns
-
-### Pipeline Pattern
-
-```go
-ctx := context.Background()
-c := chanx.NewChanx[int]()
-
-// Stage 1: Generate numbers
-numbers := c.Generate(ctx, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-
-// Stage 2: Take first 5
-first5 := c.Take(ctx, numbers, 5)
-
-// Stage 3: Process in parallel
-ch1 := c.Generate(ctx, 1, 2, 3)
-ch2 := c.Generate(ctx, 4, 5, 6)
-merged := c.FanIn(ctx, ch1, ch2)
-
-// Stage 4: Duplicate output
-out1, out2 := c.Tee(ctx, merged)
-```
-
-### Fan-Out/Fan-In Pattern
-
-```go
-ctx := context.Background()
-c := chanx.NewChanx[int]()
-
-// Input
-input := c.Generate(ctx, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-
-// Fan-out: Split work across multiple workers
-workers := make([]<-chan int, 3)
-for i := range workers {
-    workers[i] = processWorker(ctx, input)
-}
-
-// Fan-in: Merge results
-results := c.FanIn(ctx, workers...)
-
-for result := range results {
-    fmt.Println(result)
-}
-```
-
-## New Features (v2.0)
-
-### Buffered Channel Variants
-
-Create channels with custom buffer sizes for optimized performance:
-
-```go
-ctx := context.Background()
-c := chanx.NewChanx[int]()
-
-// Create buffered channel with size 10
-ch, err := c.GenerateBuffered(ctx, 10, 1, 2, 3, 4, 5)
-if err != nil {
-    log.Fatal(err)
-}
-
-// Buffered repeat channel
-repeatCh, err := c.RepeatBuffered(ctx, 20, "hello", "world")
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-### Batch Task Submission
-
-Submit multiple tasks at once for better throughput:
-
-```go
-ctx := context.Background()
-
-wp, _ := chanx.NewWorkerPool[int](ctx, 5)
-defer wp.Close()
-
-// Prepare batch of tasks
-tasks := make([]chanx.Task[int], 100)
-for i := range tasks {
-    taskID := i
-    tasks[i] = chanx.Task[int]{
-        Fn: func() (int, error) {
-            return taskID * 2, nil
-        },
-    }
-}
-
-// Submit all tasks at once
-result := wp.SubmitBatch(tasks)
-fmt.Printf("Submitted %d tasks\n", result.SubmittedCount)
-if len(result.Errors) > 0 {
-    fmt.Printf("Failed to submit %d tasks\n", len(result.Errors))
-}
-```
-
-### Performance Metrics
-
-Monitor your worker pool in real-time:
-
-```go
-ctx := context.Background()
-
-wp, _ := chanx.NewWorkerPool[int](ctx, 10)
-defer wp.Close()
-
-// Submit some tasks...
-
-// Get current metrics
-metrics := wp.Metrics()
-fmt.Printf("Active Workers: %d\n", metrics.ActiveWorkers)
-fmt.Printf("Queued Tasks: %d\n", metrics.QueuedTasks)
-fmt.Printf("Completed Tasks: %d\n", metrics.CompletedTasks)
-fmt.Printf("Failed Tasks: %d\n", metrics.FailedTasks)
-fmt.Printf("Average Task Duration: %v\n", metrics.AvgTaskDuration)
-```
-
-## Performance Optimization Guide
-
-### Choosing Buffer Sizes
-
-**Unbuffered Channels (default)**
-
-- Use when you need strict synchronization
-- Best for low-throughput scenarios
-- Ensures sender and receiver are synchronized
-
-**Buffered Channels**
-
-- Use `GenerateBuffered` or `RepeatBuffered` for high-throughput scenarios
-- Buffer size of 10-100 works well for most cases
-- Larger buffers reduce blocking but increase memory usage
-
-```go
-// High-throughput scenario
-ch, _ := c.GenerateBuffered(ctx, 50, values...)
-
-// Low-latency scenario (small buffer)
-ch, _ := c.GenerateBuffered(ctx, 5, values...)
-```
-
-### Worker Pool Sizing
-
-**CPU-Bound Tasks**
-
-```go
-// Use number of CPU cores
-numWorkers := runtime.NumCPU()
-wp, _ := chanx.NewWorkerPool[int](ctx, numWorkers)
-```
-
-**I/O-Bound Tasks**
-
-```go
-// Use higher worker count (2-10x CPU cores)
-numWorkers := runtime.NumCPU() * 4
-wp, _ := chanx.NewWorkerPool[int](ctx, numWorkers)
-```
-
-**Mixed Workloads**
-
-```go
-// Start with 2x CPU cores and adjust based on metrics
-numWorkers := runtime.NumCPU() * 2
-wp, _ := chanx.NewWorkerPool[int](ctx, numWorkers)
-
-// Monitor and adjust
-metrics := wp.Metrics()
-if metrics.QueuedTasks > 100 {
-    // Consider increasing worker count
-}
-```
-
-### Batch Submission Benefits
-
-Batch submission provides significant performance improvements:
-
-- **50%+ faster** than individual submissions for large task sets
-- Reduces lock contention
-- Better CPU cache utilization
-- Lower overhead per task
-
-```go
-// Instead of this (slow):
-for _, task := range tasks {
-    wp.Submit(task)
-}
-
-// Do this (fast):
-result := wp.SubmitBatch(tasks)
-```
-
-### Or Function Optimization
-
-The `Or` function now uses an iterative implementation instead of recursive:
-
-- **No stack overflow** with large numbers of channels
-- **50%+ faster** for 100+ channels
-- **Lower memory usage** - fewer goroutines created
-
-```go
-// Efficiently handle many channels
-channels := make([]<-chan int, 500)
-for i := range channels {
-    channels[i] = c.Generate(ctx, i)
-}
-orChan := c.Or(channels...)
-```
-
-### Bridge Function Performance
-
-The `Bridge` function now uses buffered internal channels:
-
-- **30%+ higher throughput**
-- Reduced blocking between channel streams
-- Better concurrent processing
-
-```go
-// Optimized for high-throughput channel streams
-chanStream := make(chan (<-chan int))
-bridged := c.Bridge(ctx, chanStream)
-```
-
-## Resource Management Best Practices
-
-### Always Use Context
-
-Every operation should have a context with timeout or cancellation:
-
-```go
-// Good: Context with timeout
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-defer cancel()
-
-ch := c.Generate(ctx, values...)
-
-// Bad: No timeout
-ctx := context.Background()
-ch := c.Generate(ctx, values...)
-```
-
-### Drain Channels or Cancel Context
-
-To prevent goroutine leaks, always either:
-
-1. **Drain the channel completely**:
-
-```go
-ch := c.Generate(ctx, 1, 2, 3, 4, 5)
-for v := range ch {
-    process(v)
-}
-// Channel is drained, goroutine exits
-```
-
-2. **Cancel the context**:
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-
-ch := c.Repeat(ctx, 1, 2, 3)
-// Read some values...
-cancel() // Goroutine exits
-```
-
-### Worker Pool Lifecycle
-
-Always close worker pools to ensure clean shutdown:
-
-```go
-wp, err := chanx.NewWorkerPool[int](ctx, 5)
-if err != nil {
-    return err
-}
-defer wp.Close() // Waits for all tasks to complete
-
-// Submit tasks...
-```
-
-### Handling Errors
-
-Check errors from all operations:
-
-```go
-// Check worker pool creation
-wp, err := chanx.NewWorkerPool[int](ctx, 0)
-if err != nil {
-    // Handle error: ErrInvalidWorkerCount
-}
-
-// Check buffered channel creation
-c := chanx.NewChanx[int]()
-ch, err := c.GenerateBuffered(ctx, -1, values...)
-if err != nil {
-    // Handle error: ErrInvalidBufferSize
-}
-
-// Check task submission
-err = wp.Submit(task)
-if err != nil {
-    // Handle error: ErrPoolClosed or ErrContextCancelled
-}
-```
-
-### Goroutine Leak Prevention
-
-The library is designed to prevent goroutine leaks:
-
-- All goroutines respect context cancellation
-- Goroutines exit within 1 second of context cancellation
-- No orphaned goroutines after operations complete
-
-Verify in your tests:
-
-```go
-import "go.uber.org/goleak"
-
-func TestMain(m *testing.M) {
-    goleak.VerifyTestMain(m)
-}
-```
-
-## Monitoring and Metrics
-
-### Real-Time Monitoring
-
-Use `Metrics()` to monitor worker pool health:
-
-```go
-wp, _ := chanx.NewWorkerPool[int](ctx, 10)
-
-// Periodic monitoring
-ticker := time.NewTicker(5 * time.Second)
-defer ticker.Stop()
-
-go func() {
-    for range ticker.C {
-        metrics := wp.Metrics()
-        log.Printf("Pool Status - Active: %d, Queued: %d, Completed: %d, Failed: %d, Avg Duration: %v",
-            metrics.ActiveWorkers,
-            metrics.QueuedTasks,
-            metrics.CompletedTasks,
-            metrics.FailedTasks,
-            metrics.AvgTaskDuration,
-        )
-    }
-}()
-```
-
-### Key Metrics Explained
-
-**ActiveWorkers**
-
-- Number of workers currently executing tasks
-- Should be close to worker count under load
-- Low value indicates insufficient work or bottlenecks
-
-**QueuedTasks**
-
-- Number of tasks waiting for execution
-- High value indicates workers are saturated
-- Consider increasing worker count if consistently high
-
-**CompletedTasks**
-
-- Total number of successfully completed tasks
-- Use to track throughput over time
-
-**FailedTasks**
-
-- Total number of tasks that returned errors
-- Monitor for error rate trends
-
-**AvgTaskDuration**
-
-- Average time to execute a task
-- Use to identify performance degradation
-- Compare against baseline to detect issues
-
-### Performance Alerts
-
-Set up alerts based on metrics:
-
-```go
+// Create pool
+wp, err := NewWorkerPool[T](ctx, workerCount)
+
+// Submit tasks
+err := wp.Submit(Task[T]{Fn: func() (T, error) {...}})
+result := wp.SubmitBatch([]Task[T]{...})
+
+// Get results and metrics
+results := wp.Results()
 metrics := wp.Metrics()
 
-// Alert: Too many queued tasks
-if metrics.QueuedTasks > 1000 {
-    log.Warn("Worker pool queue is backing up")
-}
-
-// Alert: High failure rate
-failureRate := float64(metrics.FailedTasks) / float64(metrics.CompletedTasks + metrics.FailedTasks)
-if failureRate > 0.1 {
-    log.Warn("Task failure rate exceeds 10%")
-}
-
-// Alert: Slow task execution
-if metrics.AvgTaskDuration > 5*time.Second {
-    log.Warn("Average task duration is high")
-}
+// Cleanup
+wp.Close()
 ```
 
-## Performance Considerations
+### Distributed Lock
 
-- All channel operations are non-blocking with context support
-- Worker pool uses buffered channels for better throughput
-- Goroutines are properly cleaned up on context cancellation
-- No goroutine leaks - all spawned goroutines respect context
-- Or function uses iterative implementation to avoid stack overflow
-- Bridge function uses buffered internal channels for higher throughput
-- Batch submission reduces lock contention and improves performance
+```go
+// Create lock
+lock := NewDistributedLock(key, redisClient, options...)
+
+// Acquire/Release
+acquired, err := lock.Acquire(ctx)
+err = lock.Release()
+
+// With retry
+acquired, err := lock.TryAcquire(ctx, timeout, retryInterval)
+
+// Helper functions
+err := LockGuard(ctx, lock, fn)
+err := LockGuardWithRetry(ctx, lock, timeout, retryInterval, fn)
+```
+
+## Best Practices
+
+1. **Always use context with timeout** to prevent goroutine leaks
+2. **Drain channels or cancel context** when done
+3. **Use defer for cleanup**: `defer wp.Close()`, `defer lock.Release()`
+4. **Choose appropriate worker count**:
+   - CPU-bound: `runtime.NumCPU()`
+   - I/O-bound: `runtime.NumCPU() * 4`
+5. **Set lock TTL** to at least 3x expected operation duration
+6. **Use buffered variants** for high-throughput scenarios
 
 ## Requirements
 
-- Go 1.18 or higher (for generics support)
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- Go 1.18+ (generics support)
+- Redis (for distributed locks only)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - see [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- Inspired by "Concurrency in Go" by Katherine Cox-Buday
-- Uses [gopter](https://github.com/leanovate/gopter) for property-based testing
-- Uses [testify](https://github.com/stretchr/testify) for assertions
-
-## Related Projects
-
-- [Go Concurrency Patterns](https://go.dev/blog/pipelines)
-- [Concurrency in Go (Book)](https://www.oreilly.com/library/view/concurrency-in-go/9781491941294/)
+Inspired by ["Concurrency in Go"](https://www.oreilly.com/library/view/concurrency-in-go/9781491941294/) by Katherine Cox-Buday
